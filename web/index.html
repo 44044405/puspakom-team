@@ -800,7 +800,7 @@ function copyRowMsg(e,id){e.stopPropagation();const r=get(id);if(!r)return;
   quickMsg(id,types[0])}
 function stopRow(e){e.stopPropagation()}
 
-const PUSPAKOM_BOOKING_URL='https://mypuspakom.puspakom.com.my/';
+const PUSPAKOM_BOOKING_URL='https://gicheck.my/';
 function arrangeBooking(){window.open(PUSPAKOM_BOOKING_URL,'_blank','noopener');}
 function viewMaster(){
   const matchCo=r=>!fltCompany||(r.company||'').toLowerCase().includes(fltCompany.toLowerCase());
