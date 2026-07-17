@@ -213,6 +213,11 @@ body{
 .trow .cell{font-size:13px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
 .trow .cell b{color:var(--ink);font-weight:600}
 .trow .runner{font-size:12.5px;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.trow.urgent{background:var(--s-fail-bg);box-shadow:inset 4px 0 0 var(--s-fail)}
+.trow.urgent:hover{background:var(--s-fail-bg)}
+.trow.urgent .cmp b{color:var(--s-fail)}
+.card.urgent{border-color:var(--s-fail);box-shadow:0 0 0 1px var(--s-fail),0 8px 22px rgba(177,111,98,.18)}
+.urgent-tag{display:block;margin-top:2px;font-size:10.5px;font-weight:800;color:var(--s-fail);letter-spacing:.2px}
 .pill{font-size:11px;font-weight:600;border-radius:18px;padding:5px 11px;white-space:nowrap;display:inline-block}
 .tbl-cards{display:none}
 
@@ -565,7 +570,7 @@ function get(id){return DATA.find(r=>r.id===id)}
 
 function seed(){
   const mk=o=>Object.assign({id:uid(),roadtaxDue:'',insuranceDue:'',clientType:'Corporate',puspakomOnly:false,paymentStatus:'Not set',picName:'',
-    testCardLink:'',puspakomReportLink:'',driveLink:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runnerRemark:'',b2Remark:'',quotationNo:'',invoiceNo:'',
+    testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runnerRemark:'',b2Remark:'',quotationNo:'',invoiceNo:'',
     ourCharge:330,runnerCharge:0,testCardFee:0,additionalAmount:0,additionalReason:'',renewalDue:'',
     geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,manualChecked:false,
     paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
@@ -794,6 +799,9 @@ function stopRow(e){e.stopPropagation()}
 
 function viewMaster(){
   const matchCo=r=>!fltCompany||(r.company||'').toLowerCase().includes(fltCompany.toLowerCase());
+  // Urgent: inspection is 7 days away (or already past) but nobody has contacted
+  // the customer yet — flag it red so it's impossible to miss.
+  const urgentContact=r=>{if(r.status!=='PENDING_CONTACT'||!r.inspectionDate)return false;const d=daysUntil(r.inspectionDate);return d!=null&&d<=7;};
   const holdRows=DATA.filter(r=>r.status==='ON_HOLD'&&matchCo(r)).sort((a,b)=>(a.puspakomDue||'').localeCompare(b.puspakomDue||''));
   const asr=assistRows().filter(matchCo);
   const head=`<div class="trow head">
@@ -804,8 +812,8 @@ function viewMaster(){
     <div class="sortable" onclick="setMSort('puspakomDue')">Puspakom Due ${mSortIcon('puspakomDue')}</div>
     <div class="sortable" onclick="setMSort('inspectionDate')">Inspection ${mSortIcon('inspectionDate')}</div>
     <div class="sortable" onclick="setMSort('status')">Status ${mSortIcon('status')}</div></div>`;
-  const tr=r=>`<div class="trow" onclick="openDetail('${r.id}')">
-    <div class="cmp"><b>${r.company}</b></div>
+  const tr=r=>`<div class="trow${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
+    <div class="cmp"><b>${r.company}</b>${urgentContact(r)?`<small class="urgent-tag">⚠ 快到期未联系 · contact now</small>`:''}</div>
     <div class="cell"><b>${r.plate}</b></div>
     <div class="cell"><span class="runner" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;${r.runner}</span></div>
     <div class="cell"><b>RM${(+r.ourCharge||0)}</b></div>
@@ -817,8 +825,8 @@ function viewMaster(){
         <span class="stdisp" style="color:${r.status==='PASS'?'var(--s-pass-cy)':'var(--navy)'}">${STATUS[r.status]?STATUS[r.status].l:''}</span>
       </div>
       ${STATUS_MSG[r.status]&&STATUS_MSG[r.status].length?`<button class="stcopy" title="Copy WhatsApp message" onclick="copyRowMsg(event,'${r.id}')">📋</button>`:''}</div></div>`;
-  const card=r=>`<div class="card glass lift" onclick="openDetail('${r.id}')">
-    <div class="cmain" style="grid-column:1/2"><h3>${r.plate}</h3><div class="co">${r.company}</div>
+  const card=r=>`<div class="card glass lift${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
+    <div class="cmain" style="grid-column:1/2"><h3>${r.plate}</h3><div class="co">${r.company}</div>${urgentContact(r)?`<div class="urgent-tag">⚠ 快到期未联系 · contact now</div>`:''}
       <div class="cmeta"><span class="tag">Due <b>${fmt(r.puspakomDue)}</b></span><span class="tag">Insp <b>${fmt(r.inspectionDate)}</b></span>
       <span class="tag" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;<b style="color:${RUNNER_COLOR[r.runner]}">${r.runner}</b></span>
       <span class="tag">RM<b>${+r.ourCharge||0}</b></span></div>
@@ -1029,7 +1037,8 @@ function renderSheet(){
          <label class="ck ${r.geranReceived?'done':''}" onclick="event.preventDefault();toggleCk('geranReceived')"><input type="checkbox" ${r.geranReceived?'checked':''}> Geran Original</label>
          <label class="ck ${r.discReceived?'done':''}" onclick="event.preventDefault();toggleCk('discReceived')"><input type="checkbox" ${r.discReceived?'checked':''}> Puspakom Disc</label>
          <label class="ck ${r.runnerInvoiceReceived?'done':''}" onclick="event.preventDefault();toggleCk('runnerInvoiceReceived')"><input type="checkbox" ${r.runnerInvoiceReceived?'checked':''}> Runner bill (needed before paying runner)</label></div>
-       ${linkField('Puspakom report PDF','f_puspakomReportLink',r.puspakomReportLink)}
+       ${linkField('Puspakom Booking Slip PDF (📄 press Open to view — links to Drive)','f_bookingSlipLink',r.bookingSlipLink)}
+       ${linkField('Puspakom Report PDF (📄 press Open to view — links to Drive)','f_puspakomReportLink',r.puspakomReportLink)}
        <div class="import-rep">
          <button type="button" class="mini import-btn" onclick="openReportPaste()">📋 Paste Puspakom report text — auto-fills due date &amp; status</button>
          <div id="reportPasteBox" style="display:none;margin-top:8px">
@@ -1048,8 +1057,6 @@ function renderSheet(){
                  :`<div class="nextcyc">No next-cycle record. <a href="#" onclick="makeNext(event,'${r.id}')">Create next cycle →</a></div>`)
            :`<button class="bigbtn green" onclick="confirmPass()">Confirm done · add to Payment + create next cycle</button>`}`:''}</div>
 
-     <div class="sect"><label class="h">6 · Drive Link (if needed)</label>
-       ${linkField('Drive link','f_driveLink',r.driveLink)}</div>
 
      <button class="bigbtn ghost" onclick="saveSheet()">Save changes</button>
      <button class="bigbtn danger" style="margin-top:8px" onclick="delRecord('${r.id}')">Delete this record</button>
@@ -1060,7 +1067,7 @@ function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=
   if(ns!==r.status){r.history=r.history||[];r.history.push({s:ns,t:nowStamp()});if(ns==='CONTACTED'&&!r.contactedDate)r.contactedDate=toISO(new Date());}
   r.status=ns;
   const map={f_company:'company',f_plate:'plate',f_puspakomDue:'puspakomDue',f_roadtaxDue:'roadtaxDue',f_insuranceDue:'insuranceDue',f_inspectionDate:'inspectionDate',
-    f_clientType:'clientType',f_paymentStatus:'paymentStatus',f_picName:'picName',f_testCardLink:'testCardLink',f_puspakomReportLink:'puspakomReportLink',f_driveLink:'driveLink',
+    f_clientType:'clientType',f_paymentStatus:'paymentStatus',f_picName:'picName',f_testCardLink:'testCardLink',f_puspakomReportLink:'puspakomReportLink',f_bookingSlipLink:'bookingSlipLink',
     f_b2Remark:'b2Remark',f_quotationNo:'quotationNo',f_invoiceNo:'invoiceNo',f_customerContact:'customerContact',f_pickupAddress:'pickupAddress',
     f_remark:'remark',f_additionalReason:'additionalReason',f_failItems:'failItems',f_retestDate:'retestDate',f_onHoldReason:'onHoldReason',f_renewalDue:'renewalDue'};
   for(const k in map){const v=g(k);if(v!==undefined)r[map[k]]=v}
@@ -1074,7 +1081,7 @@ function computeRenewal(r){const due=r.puspakomDue||'',pd=passDate(r);const anch
 function createNextCycle(r){
   const nd=r.renewalDue||computeRenewal(r);
   const n={id:uid(),company:r.company,plate:r.plate,puspakomDue:nd,roadtaxDue:r.roadtaxDue,insuranceDue:r.insuranceDue,runner:r.runner,inspectionType:r.inspectionType,
-    clientType:r.clientType,puspakomOnly:r.puspakomOnly,picName:r.picName,paymentStatus:'Not set',testCardLink:'',puspakomReportLink:'',driveLink:'',
+    clientType:r.clientType,puspakomOnly:r.puspakomOnly,picName:r.picName,paymentStatus:'Not set',testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',
     salesInsuranceHandled:false,salesRoadtaxHandled:false,
     b2Remark:r.b2Remark,quotationNo:'',invoiceNo:'',ourCharge:r.ourCharge,runnerCharge:0,testCardFee:0,additionalAmount:0,additionalReason:'',
     renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,manualChecked:false,
@@ -1117,7 +1124,7 @@ function addNew(){const g=id=>document.getElementById(id).value;
   const actualDate=g('n_actualInspectionDate');
   const r={id:uid(),company:g('n_company').trim()||'(no company)',plate:g('n_plate').trim().toUpperCase(),puspakomDue:g('n_puspakomDue'),
     roadtaxDue:g('n_roadtaxDue'),insuranceDue:g('n_insuranceDue'),clientType:g('n_clientType'),puspakomOnly:false,paymentStatus:'Not set',picName:'',
-    testCardLink:'',puspakomReportLink:'',driveLink:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runner:bk?'BOOKING ONLY':'MR LEE',inspectionType:g('n_inspectionType'),b2Remark:'',
+    testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runner:bk?'BOOKING ONLY':'MR LEE',inspectionType:g('n_inspectionType'),b2Remark:'',
     quotationNo:g('n_quotationNo').trim(),invoiceNo:'',ourCharge:+g('n_ourCharge')||330,runnerCharge:0,testCardFee:0,additionalAmount:0,
     additionalReason:'',renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,
     manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
