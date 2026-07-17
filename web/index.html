@@ -570,7 +570,7 @@ function get(id){return DATA.find(r=>r.id===id)}
 
 function seed(){
   const mk=o=>Object.assign({id:uid(),roadtaxDue:'',insuranceDue:'',clientType:'Corporate',puspakomOnly:false,paymentStatus:'Not set',picName:'',
-    testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runnerRemark:'',b2Remark:'',quotationNo:'',invoiceNo:'',
+    testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',salesInsuranceHandled:false,salesRoadtaxHandled:false,runnerRemark:'',b2Remark:'',quotationNo:'',invoiceNo:'',
     ourCharge:330,runnerCharge:0,testCardFee:0,additionalAmount:0,additionalReason:'',renewalDue:'',
     geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,manualChecked:false,
     paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
@@ -1009,7 +1009,7 @@ function renderSheet(){
        <label class="ck ${r.puspakomOnly?'done':''}" onclick="event.preventDefault();toggleCk('puspakomOnly')"><input type="checkbox" ${r.puspakomOnly?'checked':''}> Puspakom only (no road tax / insurance handled)</label></div>
 
      <div class="sect"><label class="h">2 · Vehicle Details</label>
-       ${field('Vehicle no','f_plate',r.plate)}
+       <div class="grid2">${field('Vehicle no','f_plate',r.plate)}${field('Puspakom branch','f_puspakomBranch',r.puspakomBranch||'Mak Mandin','select',['Mak Mandin','Batu Maung','Teluk Kumbar'])}</div>
        <div class="grid3">${field('Puspakom due','f_puspakomDue',r.puspakomDue,'date')}${field('Roadtax due','f_roadtaxDue',r.roadtaxDue,'date')}${field('Insurance due','f_insuranceDue',r.insuranceDue,'date')}</div></div>
 
      <div class="sect"><label class="h">3 · Arrangement Details</label>
@@ -1067,7 +1067,7 @@ function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=
   if(ns!==r.status){r.history=r.history||[];r.history.push({s:ns,t:nowStamp()});if(ns==='CONTACTED'&&!r.contactedDate)r.contactedDate=toISO(new Date());}
   r.status=ns;
   const map={f_company:'company',f_plate:'plate',f_puspakomDue:'puspakomDue',f_roadtaxDue:'roadtaxDue',f_insuranceDue:'insuranceDue',f_inspectionDate:'inspectionDate',
-    f_clientType:'clientType',f_paymentStatus:'paymentStatus',f_picName:'picName',f_testCardLink:'testCardLink',f_puspakomReportLink:'puspakomReportLink',f_bookingSlipLink:'bookingSlipLink',
+    f_clientType:'clientType',f_paymentStatus:'paymentStatus',f_picName:'picName',f_testCardLink:'testCardLink',f_puspakomReportLink:'puspakomReportLink',f_bookingSlipLink:'bookingSlipLink',f_puspakomBranch:'puspakomBranch',
     f_b2Remark:'b2Remark',f_quotationNo:'quotationNo',f_invoiceNo:'invoiceNo',f_customerContact:'customerContact',f_pickupAddress:'pickupAddress',
     f_remark:'remark',f_additionalReason:'additionalReason',f_failItems:'failItems',f_retestDate:'retestDate',f_onHoldReason:'onHoldReason',f_renewalDue:'renewalDue'};
   for(const k in map){const v=g(k);if(v!==undefined)r[map[k]]=v}
@@ -1081,7 +1081,7 @@ function computeRenewal(r){const due=r.puspakomDue||'',pd=passDate(r);const anch
 function createNextCycle(r){
   const nd=r.renewalDue||computeRenewal(r);
   const n={id:uid(),company:r.company,plate:r.plate,puspakomDue:nd,roadtaxDue:r.roadtaxDue,insuranceDue:r.insuranceDue,runner:r.runner,inspectionType:r.inspectionType,
-    clientType:r.clientType,puspakomOnly:r.puspakomOnly,picName:r.picName,paymentStatus:'Not set',testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',
+    clientType:r.clientType,puspakomOnly:r.puspakomOnly,picName:r.picName,paymentStatus:'Not set',testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',
     salesInsuranceHandled:false,salesRoadtaxHandled:false,
     b2Remark:r.b2Remark,quotationNo:'',invoiceNo:'',ourCharge:r.ourCharge,runnerCharge:0,testCardFee:0,additionalAmount:0,additionalReason:'',
     renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,manualChecked:false,
@@ -1124,7 +1124,7 @@ function addNew(){const g=id=>document.getElementById(id).value;
   const actualDate=g('n_actualInspectionDate');
   const r={id:uid(),company:g('n_company').trim()||'(no company)',plate:g('n_plate').trim().toUpperCase(),puspakomDue:g('n_puspakomDue'),
     roadtaxDue:g('n_roadtaxDue'),insuranceDue:g('n_insuranceDue'),clientType:g('n_clientType'),puspakomOnly:false,paymentStatus:'Not set',picName:'',
-    testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runner:bk?'BOOKING ONLY':'MR LEE',inspectionType:g('n_inspectionType'),b2Remark:'',
+    testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',salesInsuranceHandled:false,salesRoadtaxHandled:false,runner:bk?'BOOKING ONLY':'MR LEE',inspectionType:g('n_inspectionType'),b2Remark:'',
     quotationNo:g('n_quotationNo').trim(),invoiceNo:'',ourCharge:+g('n_ourCharge')||330,runnerCharge:0,testCardFee:0,additionalAmount:0,
     additionalReason:'',renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,
     manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
