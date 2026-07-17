@@ -1,0 +1,14 @@
+{
+  "name": "puspakom-team",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Puspakom Dashboard — team-shared version (Express backend + shared data store + login)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  }
+}
