@@ -124,6 +124,9 @@ body{
 .rt-amt{font-size:13px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;width:115px;text-align:right;flex-shrink:0}
 
 .filters{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
+.book-btn{margin-left:auto;border:0;cursor:pointer;font:inherit;font-size:13.5px;font-weight:680;color:#fff;padding:11px 18px;border-radius:12px;background:linear-gradient(145deg,#5a8a7d,#3f7d6d);box-shadow:0 4px 14px rgba(63,125,109,.3);transition:.2s;white-space:nowrap;display:inline-flex;align-items:center;gap:7px}
+.book-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(63,125,109,.38)}
+.book-btn:active{transform:scale(.98)}
 .filters select{font:inherit;font-size:13.5px;font-weight:560;color:var(--navy);background:var(--glass-strong);border:1px solid rgba(255,255,255,.7);border-radius:12px;padding:10px 14px;cursor:pointer;box-shadow:var(--shadow);outline:none}
 .mnav{display:inline-flex;gap:4px}
 .mnav button{border:0;background:var(--glass-strong);width:38px;height:38px;border-radius:11px;cursor:pointer;font-size:15px;color:var(--navy);box-shadow:var(--shadow);transition:.2s}
@@ -797,6 +800,8 @@ function copyRowMsg(e,id){e.stopPropagation();const r=get(id);if(!r)return;
   quickMsg(id,types[0])}
 function stopRow(e){e.stopPropagation()}
 
+const PUSPAKOM_BOOKING_URL='https://mypuspakom.puspakom.com.my/';
+function arrangeBooking(){window.open(PUSPAKOM_BOOKING_URL,'_blank','noopener');}
 function viewMaster(){
   const matchCo=r=>!fltCompany||(r.company||'').toLowerCase().includes(fltCompany.toLowerCase());
   // Urgent: inspection is 7 days away (or already past) but nobody has contacted
@@ -841,7 +846,7 @@ function viewMaster(){
     <select id="fY" onchange="setFlt()">${yearOptions()}</select>
     <select id="fM" onchange="setFlt()">${monthOptions()}</select>
     <div class="mnav"><button onclick="fltStep(-1)">‹</button><button onclick="fltStep(1)">›</button></div>
-    <div class="co-filter"><input id="coFilterInput" type="text" placeholder="🔍 Filter by company name…" value="${fltCompany.replace(/"/g,'&quot;')}" oninput="setCoFilter(this.value)">${fltCompany?`<button class="clr" onclick="clearCoFilter()">✕</button>`:''}</div></div>`;
+    <div class="co-filter"><input id="coFilterInput" type="text" placeholder="🔍 Filter by company name…" value="${fltCompany.replace(/"/g,'&quot;')}" oninput="setCoFilter(this.value)">${fltCompany?`<button class="clr" onclick="clearCoFilter()">✕</button>`:''}</div><button class="book-btn" onclick="arrangeBooking()">📅 Arrange Booking</button></div>`;
   const row2=`<div class="filters" style="margin-top:-6px">
     <div class="seg"><button class="${fltBasis==='due'?'on':''}" onclick="setBasis('due')">By Due Date</button><button class="${fltBasis==='insp'?'on':''}" onclick="setBasis('insp')">By Inspection</button></div>
     <button class="holdchip ${showHold?'on':''}" onclick="toggleHold()">⏸ On Hold${holdRows.length?' ('+holdRows.length+')':''}</button>
