@@ -127,9 +127,13 @@ body{
 .rt-amt{font-size:13px;font-weight:700;color:var(--navy);font-variant-numeric:tabular-nums;width:115px;text-align:right;flex-shrink:0}
 
 .filters{display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap}
-.book-btn{margin-left:auto;border:0;cursor:pointer;font:inherit;font-size:13.5px;font-weight:680;color:#fff;padding:11px 18px;border-radius:12px;background:linear-gradient(145deg,#5a8a7d,#3f7d6d);box-shadow:0 4px 14px rgba(63,125,109,.3);transition:.2s;white-space:nowrap;display:inline-flex;align-items:center;gap:7px}
+.book-actions{margin-left:auto;display:flex;flex-direction:column;gap:8px;align-items:stretch;min-width:190px}
+.book-btn,.wa-list-btn{border:0;cursor:pointer;font:inherit;font-size:13.5px;font-weight:680;color:#fff;padding:11px 18px;border-radius:12px;transition:.2s;white-space:nowrap;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.book-btn{background:linear-gradient(145deg,#5a8a7d,#3f7d6d);box-shadow:0 4px 14px rgba(63,125,109,.3)}
 .book-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(63,125,109,.38)}
-.book-btn:active{transform:scale(.98)}
+.wa-list-btn{background:linear-gradient(145deg,#25d366,#1da851);box-shadow:0 4px 14px rgba(29,168,81,.3)}
+.wa-list-btn:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(29,168,81,.38)}
+.book-btn:active,.wa-list-btn:active{transform:scale(.98)}
 .filters select{font:inherit;font-size:13.5px;font-weight:560;color:var(--navy);background:var(--glass-strong);border:1px solid rgba(255,255,255,.7);border-radius:12px;padding:10px 14px;cursor:pointer;box-shadow:var(--shadow);outline:none}
 .mnav{display:inline-flex;gap:4px}
 .mnav button{border:0;background:var(--glass-strong);width:38px;height:38px;border-radius:11px;cursor:pointer;font-size:15px;color:var(--navy);box-shadow:var(--shadow);transition:.2s}
@@ -807,11 +811,34 @@ function stopRow(e){e.stopPropagation()}
 
 const PUSPAKOM_BOOKING_URL='https://gicheck.my/';
 function arrangeBooking(){window.open(PUSPAKOM_BOOKING_URL,'_blank','noopener');}
+// Rows currently shown in Master Data (same month/company/basis filter as the view).
+function currentMasterRows(){
+  const matchCo=r=>!fltCompany||(r.company||'').toLowerCase().includes(fltCompany.toLowerCase());
+  let rows;
+  if(fltCompany){rows=DATA.filter(r=>r.status!=='ON_HOLD'&&matchCo(r));}
+  else{rows=DATA.filter(r=>{if(r.status==='ON_HOLD')return false;const dt=basisDate(r);if(!dt)return false;const d=parseISO(dt);if(d.getFullYear()!==fltYear)return false;return fltMonth==='all'||d.getMonth()===fltMonth;});}
+  return rows.sort((a,b)=>(basisDate(a)||'9').localeCompare(basisDate(b)||'9'));
+}
+// Build the current month's list as text and open WhatsApp (you pick the chat, then send).
+function sendMonthListWA(){
+  const rows=currentMasterRows();
+  if(!rows.length){toast('这个月份没有车辆可发送');return;}
+  const period=fltCompany?('“'+fltCompany+'”'):(fltMonth==='all'?(''+fltYear):(MONFULL[fltMonth]+' '+fltYear));
+  let msg='📋 Puspakom Schedule — '+period+' ('+rows.length+' vehicle'+(rows.length!==1?'s':'')+')\n\n';
+  rows.forEach((r,i)=>{
+    msg+=(i+1)+'. '+r.plate+' — '+r.company+'\n';
+    msg+='   Insp: '+fmt(r.inspectionDate)+' · Due: '+fmt(r.puspakomDue)+' · '+(r.runner||'-')+' · '+(STATUS[r.status]?STATUS[r.status].l:r.status)+'\n';
+  });
+  // Copy the full list too, in case the month is long enough to get truncated in the URL.
+  if(navigator.clipboard)navigator.clipboard.writeText(msg).catch(()=>{});
+  window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank','noopener');
+  toast('已开 WhatsApp —— 选聊天室发送即可(完整清单也已复制,可直接贴上)');
+}
 function viewMaster(){
   const matchCo=r=>!fltCompany||(r.company||'').toLowerCase().includes(fltCompany.toLowerCase());
   // Urgent: inspection is 7 days away (or already past) but nobody has contacted
   // the customer yet — flag it red so it's impossible to miss.
-  const urgentContact=r=>{if(r.status!=='PENDING_CONTACT'||!r.inspectionDate)return false;const d=daysUntil(r.inspectionDate);return d!=null&&d<=7;};
+  const urgentContact=r=>{if((r.status!=='PENDING_CONTACT'&&r.status!=='READY_TO_CONTACT')||!r.inspectionDate)return false;const d=daysUntil(r.inspectionDate);return d!=null&&d<=7;};
   const holdRows=DATA.filter(r=>r.status==='ON_HOLD'&&matchCo(r)).sort((a,b)=>(a.puspakomDue||'').localeCompare(b.puspakomDue||''));
   const asr=assistRows().filter(matchCo);
   const head=`<div class="trow head">
@@ -851,7 +878,7 @@ function viewMaster(){
     <select id="fY" onchange="setFlt()">${yearOptions()}</select>
     <select id="fM" onchange="setFlt()">${monthOptions()}</select>
     <div class="mnav"><button onclick="fltStep(-1)">‹</button><button onclick="fltStep(1)">›</button></div>
-    <div class="co-filter"><input id="coFilterInput" type="text" placeholder="🔍 Filter by company name…" value="${fltCompany.replace(/"/g,'&quot;')}" oninput="setCoFilter(this.value)">${fltCompany?`<button class="clr" onclick="clearCoFilter()">✕</button>`:''}</div><button class="book-btn" onclick="arrangeBooking()">📅 Arrange Booking</button></div>`;
+    <div class="co-filter"><input id="coFilterInput" type="text" placeholder="🔍 Filter by company name…" value="${fltCompany.replace(/"/g,'&quot;')}" oninput="setCoFilter(this.value)">${fltCompany?`<button class="clr" onclick="clearCoFilter()">✕</button>`:''}</div><div class="book-actions"><button class="book-btn" onclick="arrangeBooking()">📅 Arrange Booking</button><button class="wa-list-btn" onclick="sendMonthListWA()">💬 Send WA Message</button></div></div>`;
   const row2=`<div class="filters" style="margin-top:-6px">
     <div class="seg"><button class="${fltBasis==='due'?'on':''}" onclick="setBasis('due')">By Due Date</button><button class="${fltBasis==='insp'?'on':''}" onclick="setBasis('insp')">By Inspection</button></div>
     <button class="holdchip ${showHold?'on':''}" onclick="toggleHold()">⏸ On Hold${holdRows.length?' ('+holdRows.length+')':''}</button>
@@ -1097,7 +1124,7 @@ function createNextCycle(r){
     b2Remark:r.b2Remark,quotationNo:'',invoiceNo:'',ourCharge:r.ourCharge,runnerCharge:0,testCardFee:0,additionalAmount:0,additionalReason:'',
     renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,manualChecked:false,
     paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:r.customerContact,pickupAddress:r.pickupAddress,
-    remark:'',status:'PENDING_CONTACT',contactedDate:'',renewalCreated:false,nextId:'',prevId:r.id,demo:r.demo,history:[{s:'PENDING_CONTACT',t:nowStamp()}]};
+    remark:'',status:'READY_TO_CONTACT',contactedDate:'',renewalCreated:false,nextId:'',prevId:r.id,demo:r.demo,history:[{s:'READY_TO_CONTACT',t:nowStamp()}]};
   n.inspectionDate=calcInspection(nd,n.runner,n.id);DATA.push(n);return n.id}
 function confirmPass(){const r=readSheet();r.manualChecked=true;if(!r.renewalDue)r.renewalDue=computeRenewal(r);
   if(!r.renewalCreated){r.nextId=createNextCycle(r);r.renewalCreated=true}save();renderSheet();render();toast('Added to Payment · next cycle due '+fmt(r.renewalDue))}
@@ -1121,7 +1148,7 @@ function openNew(){
        <div class="grid2">${field('Quotation no','n_quotationNo','')}${field('Our charge (RM)','n_ourCharge','330','number')}</div>
        <div class="auto-note" id="n_preview">If we arrange a runner, the inspection date is auto-calculated. Assign the runner later in Arrangement Details.</div></div>
      <div class="sect"><label class="h">Already arranged? (optional — leave as-is for a brand-new unarranged job)</label>
-       <div class="grid2">${field('Current status','n_status',STATUS.PENDING_CONTACT.l,'select',STATUS_ORDER.map(k=>STATUS[k].l))}${field('Actual inspection date (if known)','n_actualInspectionDate','','date')}</div>
+       <div class="grid2">${field('Current status','n_status',STATUS.READY_TO_CONTACT.l,'select',STATUS_ORDER.map(k=>STATUS[k].l))}${field('Actual inspection date (if known)','n_actualInspectionDate','','date')}</div>
        <div class="hint">Set these if the case is already booked / confirmed / passed etc. — this skips the auto-calculated suggestion and records exactly what you enter.</div></div>
      <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
   showSheet();document.getElementById('n_puspakomDue').addEventListener('change',previewNew);
@@ -1131,7 +1158,7 @@ function previewNew(){const due=document.getElementById('n_puspakomDue').value,b
 function addNew(){const g=id=>document.getElementById(id).value;
   if(!g('n_plate').trim()||!g('n_puspakomDue')){toast('Please enter at least vehicle no and Puspakom due');return}
   const bk=document.getElementById('n_bookingOnly').checked;
-  const statusKey=STATUS_LABEL_TO_KEY[g('n_status')]||'PENDING_CONTACT';
+  const statusKey=STATUS_LABEL_TO_KEY[g('n_status')]||'READY_TO_CONTACT';
   const actualDate=g('n_actualInspectionDate');
   const r={id:uid(),company:g('n_company').trim()||'(no company)',plate:g('n_plate').trim().toUpperCase(),puspakomDue:g('n_puspakomDue'),
     roadtaxDue:g('n_roadtaxDue'),insuranceDue:g('n_insuranceDue'),clientType:g('n_clientType'),puspakomOnly:false,paymentStatus:'Not set',picName:'',
@@ -1139,7 +1166,7 @@ function addNew(){const g=id=>document.getElementById(id).value;
     quotationNo:g('n_quotationNo').trim(),invoiceNo:'',ourCharge:+g('n_ourCharge')||330,runnerCharge:0,testCardFee:0,additionalAmount:0,
     additionalReason:'',renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,
     manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
-    remark:'',status:statusKey,contactedDate:statusKey!=='PENDING_CONTACT'?toISO(new Date()):'',renewalCreated:false,nextId:'',prevId:'',demo:false,isNew:true,history:[{s:statusKey,t:nowStamp()}]};
+    remark:'',status:statusKey,contactedDate:(statusKey!=='PENDING_CONTACT'&&statusKey!=='READY_TO_CONTACT')?toISO(new Date()):'',renewalCreated:false,nextId:'',prevId:'',demo:false,isNew:true,history:[{s:statusKey,t:nowStamp()}]};
   r.inspectionDate=actualDate||calcInspection(r.puspakomDue,r.runner,r.id);DATA.push(r);save();closeSheet();switchView('master');toast('Added '+r.plate)}
 
 function msgText(r,type){const ins=fmt(r.inspectionDate),due=fmt(r.puspakomDue);
