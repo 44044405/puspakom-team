@@ -1117,7 +1117,10 @@ function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=
 // vehicle syncs them to every other vehicle of the same company; a new
 // vehicle for an existing company auto-inherits them.
 const COMPANY_FIELDS=['waGroupName','pickupAddress','picName','customerContact'];
-function normCo(s){return String(s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+// Match company names loosely: ignore case AND all punctuation/spacing, so
+// "SUGOTO HARVEST SDN. BHD.", "SUGOTO HARVEST SDN BHD" and "…SDN. BHD," all
+// count as the same company.
+function normCo(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();}
 function syncCompanyFields(src){
   if(!src)return 0;const key=normCo(src.company);if(!key||key==='(no company)')return 0;
   let n=0;
