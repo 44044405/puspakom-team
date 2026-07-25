@@ -1043,7 +1043,7 @@ function renderSheet(){
 
      <div class="sect"><label class="h">1 · Company Details</label>
        <div class="grid2">${field('Company name','f_company',r.company)}${field('Client type','f_clientType',r.clientType||'Corporate','select',['Corporate','Individual','Government','Other'])}</div>
-       ${field('WA group name','f_waGroupName',r.waGroupName)}
+       ${field('WA group name · 公司共用','f_waGroupName',r.waGroupName)}
        <label class="ck ${r.puspakomOnly?'done':''}" onclick="event.preventDefault();toggleCk('puspakomOnly')"><input type="checkbox" ${r.puspakomOnly?'checked':''}> Puspakom only (no road tax / insurance handled)</label></div>
 
      <div class="sect"><label class="h">2 · Vehicle Details</label>
@@ -1055,8 +1055,8 @@ function renderSheet(){
        ${r.inspectionDate!==insAuto?`<div class="auto-note">Suggested: ${fmt(insAuto)} <a href="#" onclick="useAuto(event)">Apply</a></div>`:`<div class="hint">Auto-set ~${BUFFER_DAYS} days before due (skips weekends, holidays &amp; full runner days). You may inspect up to 30 days before due.</div>`}
        <div class="grid2">${field('Runner','f_runner',r.runner,'select',RUNNERS)}${field('Inspection type','f_inspectionType',r.inspectionType,'select',ITYPES)}</div>
        ${r.inspectionType==='B2'?field('B2 inspection details','f_b2Remark',r.b2Remark):''}
-       ${field('Address of collect lorry','f_pickupAddress',r.pickupAddress,'textarea')}
-       <div class="grid2">${field('PIC name','f_picName',r.picName)}${field('PIC contact number','f_customerContact',r.customerContact)}</div>
+       ${field('Address of collect lorry · 公司共用','f_pickupAddress',r.pickupAddress,'textarea')}
+       <div class="grid2">${field('PIC name · 公司共用','f_picName',r.picName)}${field('PIC contact · 公司共用','f_customerContact',r.customerContact)}</div>
        ${linkField('Test card PDF','f_testCardLink',r.testCardLink)}</div>
 
      <div class="sect"><label class="h">4 · Inspection Fee</label>
@@ -1111,7 +1111,31 @@ function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=
   for(const k in map){const v=g(k);if(v!==undefined)r[map[k]]=v}
   ['ourCharge','runnerCharge','testCardFee','additionalAmount'].forEach(f=>{const v=g('f_'+f);if(v!==undefined)r[f]=+v||0});
   const rn=g('f_runner'),it=g('f_inspectionType');if(rn)r.runner=rn;if(it)r.inspectionType=it;return r}
-function saveSheet(){readSheet();save();renderSheet();render();toast('Saved')}
+
+// ---- Company-level shared fields ---------------------------------------
+// These belong to the company, not a single vehicle. Filling them on one
+// vehicle syncs them to every other vehicle of the same company; a new
+// vehicle for an existing company auto-inherits them.
+const COMPANY_FIELDS=['waGroupName','pickupAddress','picName','customerContact'];
+function normCo(s){return String(s||'').trim().toLowerCase().replace(/\s+/g,' ');}
+function syncCompanyFields(src){
+  if(!src)return 0;const key=normCo(src.company);if(!key||key==='(no company)')return 0;
+  let n=0;
+  DATA.forEach(r=>{
+    if(r===src||normCo(r.company)!==key)return;
+    let changed=false;
+    COMPANY_FIELDS.forEach(f=>{const v=src[f];if(v!=null&&String(v).trim()!==''&&r[f]!==v){r[f]=v;changed=true;}});
+    if(changed)n++;
+  });
+  return n;
+}
+function fillCompanyFieldsFromExisting(rec){
+  if(!rec)return;const key=normCo(rec.company);if(!key||key==='(no company)')return;
+  const src=DATA.find(r=>r!==rec&&normCo(r.company)===key&&COMPANY_FIELDS.some(f=>r[f]&&String(r[f]).trim()!==''));
+  if(!src)return;
+  COMPANY_FIELDS.forEach(f=>{if((!rec[f]||String(rec[f]).trim()==='')&&src[f])rec[f]=src[f];});
+}
+function saveSheet(){const r=readSheet();const n=r?syncCompanyFields(r):0;save();renderSheet();render();toast(n>0?('Saved · 已同步 '+n+' 辆同公司车辆'):'Saved')}
 function useAuto(e){e.preventDefault();const r=readSheet();r.inspectionDate=calcInspection(r.puspakomDue,r.runner,r.id);save();renderSheet();render();toast('Applied suggested date')}
 function toggleCk(f){const r=readSheet();r[f]=!r[f];save();renderSheet();render()}
 function passDate(r){return (r.retestDate&&r.retestDate>(r.inspectionDate||''))?r.retestDate:(r.inspectionDate||'')}
@@ -1167,7 +1191,8 @@ function addNew(){const g=id=>document.getElementById(id).value;
     additionalReason:'',renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,
     manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
     remark:'',status:statusKey,contactedDate:(statusKey!=='PENDING_CONTACT'&&statusKey!=='READY_TO_CONTACT')?toISO(new Date()):'',renewalCreated:false,nextId:'',prevId:'',demo:false,isNew:true,history:[{s:statusKey,t:nowStamp()}]};
-  r.inspectionDate=actualDate||calcInspection(r.puspakomDue,r.runner,r.id);DATA.push(r);save();closeSheet();switchView('master');toast('Added '+r.plate)}
+  r.inspectionDate=actualDate||calcInspection(r.puspakomDue,r.runner,r.id);
+  fillCompanyFieldsFromExisting(r);DATA.push(r);save();closeSheet();switchView('master');toast('Added '+r.plate)}
 
 function msgText(r,type){const ins=fmt(r.inspectionDate),due=fmt(r.puspakomDue);
   if(type==='arrange')return `Good Afternoon\n\nVehicle No : ${r.plate}   Puspakom Date : ${ins}\nPuspakom Due : ${due}\n\nPlease check and confirm the Puspakom date, please inform us if any adjustment needed. 😊\n\n⚠️ The reserve date only been hold for 3 day. Date will be rescheduled after 3 day.`;
