@@ -388,10 +388,10 @@ input[type=file]{display:none}
   <div class="login-card">
     <img class="lc-logo-img" src="chinhock-logo.jpg" alt="Chin Hock Agency">
     <h2>Puspakom Dashboard</h2>
-    <p>Chin Hock Agency — 团队共用系统</p>
-    <input id="loginEmail" type="email" placeholder="团队 email" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()" autocomplete="username">
-    <input id="loginPass" type="password" placeholder="密码" onkeydown="if(event.key==='Enter')submitLogin()" autocomplete="current-password">
-    <button id="loginBtn" onclick="submitLogin()">登录</button>
+    <p>Chin Hock Agency — Team Shared System</p>
+    <input id="loginEmail" type="email" placeholder="Team email" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()" autocomplete="username">
+    <input id="loginPass" type="password" placeholder="Password" onkeydown="if(event.key==='Enter')submitLogin()" autocomplete="current-password">
+    <button id="loginBtn" onclick="submitLogin()">Log In</button>
     <div id="loginMsg"></div>
   </div>
 </div>
@@ -539,8 +539,8 @@ let currentRev=0,dirtyPending=false,savingInFlight=false,pollTimer=null;
 //   5. In Google Drive, open the "Puspakom VR1 Report" folder → its URL is
 //      https://drive.google.com/drive/folders/<FOLDER_ID> → copy FOLDER_ID.
 //   6. Paste both values below, replacing the two PASTE_… placeholders.
-const DRIVE_CLIENT_ID='PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE';
-const DRIVE_ROOT_FOLDER_ID='PASTE_YOUR_PUSPAKOM_VR1_REPORT_FOLDER_ID_HERE';
+const DRIVE_CLIENT_ID='959507503596-dde4o0pmbt1ndvbnsprcn2bqn9fgjeib.apps.googleusercontent.com';
+const DRIVE_ROOT_FOLDER_ID='1uiWWtbFTncj5GQMmCj6lP6kosUTbeIiY';
 const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
 let driveTokenClient=null,driveAccessToken=null,driveTokenExpiry=0;
 function driveReady(){return !!DRIVE_CLIENT_ID&&!DRIVE_CLIENT_ID.startsWith('PASTE_')&&!!DRIVE_ROOT_FOLDER_ID&&!DRIVE_ROOT_FOLDER_ID.startsWith('PASTE_')}
@@ -681,11 +681,11 @@ async function pushNow(){
     const {data,error}=await sb.from('app_state')
       .update({data:DATA,rev:nextRev,updated_at:new Date().toISOString(),updated_by:(typeof myName==='function'&&myName())||'Unknown'})
       .eq('id',1).eq('rev',currentRev).select('rev,data');
-    if(error){if(/JWT|auth|permission|token/i.test(error.message||''))showLogin('登录已过期,请重新登录');return;}
+    if(error){if(/JWT|auth|permission|token/i.test(error.message||''))showLogin('Login expired — please log in again');return;}
     if(!data||!data.length){
       // conflict: someone else already saved (rev moved) — reload their version
       const cur=await sb.from('app_state').select('rev,data').eq('id',1).single();
-      if(cur.data){DATA=Array.isArray(cur.data.data)?cur.data.data:[];currentRev=cur.data.rev||0;migrate();render();toast('⚠️ 资料已被别人更新,已载入最新版 — 请重新确认你刚才的修改');}
+      if(cur.data){DATA=Array.isArray(cur.data.data)?cur.data.data:[];currentRev=cur.data.rev||0;migrate();render();toast('⚠️ Data was updated by someone else — latest version loaded, please recheck your recent changes');}
       return;
     }
     currentRev=data[0].rev;
@@ -710,25 +710,25 @@ function hideLogin(){const el=document.getElementById('loginOverlay');if(el)el.s
 async function submitLogin(){
   const email=(((document.getElementById('loginEmail')||{}).value)||'').trim();
   const pass=((document.getElementById('loginPass')||{}).value)||'';
-  if(!email||!pass){showLogin('请输入 email 和密码');return;}
-  const btn=document.getElementById('loginBtn');if(btn){btn.disabled=true;btn.textContent='登录中…';}
+  if(!email||!pass){showLogin('Please enter email and password');return;}
+  const btn=document.getElementById('loginBtn');if(btn){btn.disabled=true;btn.textContent='Logging in…';}
   const {error}=await sb.auth.signInWithPassword({email,password:pass});
-  if(btn){btn.disabled=false;btn.textContent='登录';}
-  if(error){showLogin('登录失败:'+(error.message||'请检查 email 和密码'));return;}
+  if(btn){btn.disabled=false;btn.textContent='Log In';}
+  if(error){showLogin('Login failed: '+(error.message||'Please check your email and password'));return;}
   localStorage.setItem('pk_email',email);hideLogin();boot();
 }
-async function logout(){try{await sb.auth.signOut();}catch(e){}if(pollTimer)clearInterval(pollTimer);showLogin('已登出');}
+async function logout(){try{await sb.auth.signOut();}catch(e){}if(pollTimer)clearInterval(pollTimer);showLogin('Logged out');}
 async function boot(){
   try{
     const {data:{session}}=await sb.auth.getSession();
-    if(!session){showLogin('请登录');return;}
+    if(!session){showLogin('Please log in');return;}
     await loadFromServer();
     let seeded=false;
     if(!DATA.length){DATA=seed();seeded=true;}
     applyAutoReminders();
     if(seeded)save();
     render();renderWhoAmI();startPolling();
-  }catch(e){showLogin('无法载入资料:'+((e&&e.message)||'请稍后再试'));}
+  }catch(e){showLogin('Could not load data: '+((e&&e.message)||'Please try again later'));}
 }
 function uid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
 function get(id){return DATA.find(r=>r.id===id)}
@@ -975,7 +975,7 @@ function currentMasterRows(){
 // Build the current month's list as text and open WhatsApp (you pick the chat, then send).
 function sendMonthListWA(){
   const rows=currentMasterRows();
-  if(!rows.length){toast('这个月份没有车辆可发送');return;}
+  if(!rows.length){toast('No vehicles to send for this month');return;}
   const period=fltCompany?('“'+fltCompany+'”'):(fltMonth==='all'?(''+fltYear):(MONFULL[fltMonth]+' '+fltYear));
   let msg='📋 Puspakom Schedule — '+period+' ('+rows.length+' vehicle'+(rows.length!==1?'s':'')+')\n\n';
   rows.forEach((r,i)=>{
@@ -985,7 +985,7 @@ function sendMonthListWA(){
   // Copy the full list too, in case the month is long enough to get truncated in the URL.
   if(navigator.clipboard)navigator.clipboard.writeText(msg).catch(()=>{});
   window.open('https://wa.me/?text='+encodeURIComponent(msg),'_blank','noopener');
-  toast('已开 WhatsApp —— 选聊天室发送即可(完整清单也已复制,可直接贴上)');
+  toast('WhatsApp opened — pick a chat to send (full list also copied, paste if needed)');
 }
 function viewMaster(){
   const matchCo=r=>!fltCompany||(r.company||'').toLowerCase().includes(fltCompany.toLowerCase());
@@ -1003,7 +1003,7 @@ function viewMaster(){
     <div class="sortable" onclick="setMSort('inspectionDate')">Inspection ${mSortIcon('inspectionDate')}</div>
     <div class="sortable" onclick="setMSort('status')">Status ${mSortIcon('status')}</div></div>`;
   const tr=r=>`<div class="trow${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
-    <div class="cmp"><b>${r.company}</b>${urgentContact(r)?`<small class="urgent-tag">⚠ 快到期未联系 · contact now</small>`:''}</div>
+    <div class="cmp"><b>${r.company}</b>${urgentContact(r)?`<small class="urgent-tag">⚠ Due soon, not contacted · contact now</small>`:''}</div>
     <div class="cell"><b>${r.plate}</b></div>
     <div class="cell"><span class="runner" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;${r.runner}</span></div>
     <div class="cell"><b>RM${(+r.ourCharge||0)}</b></div>
@@ -1016,7 +1016,7 @@ function viewMaster(){
       </div>
       ${STATUS_MSG[r.status]&&STATUS_MSG[r.status].length?`<button class="stcopy" title="Copy WhatsApp message" onclick="copyRowMsg(event,'${r.id}')">📋</button>`:''}</div></div>`;
   const card=r=>`<div class="card glass lift${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
-    <div class="cmain" style="grid-column:1/2"><h3>${r.plate}</h3><div class="co">${r.company}</div>${urgentContact(r)?`<div class="urgent-tag">⚠ 快到期未联系 · contact now</div>`:''}
+    <div class="cmain" style="grid-column:1/2"><h3>${r.plate}</h3><div class="co">${r.company}</div>${urgentContact(r)?`<div class="urgent-tag">⚠ Due soon, not contacted · contact now</div>`:''}
       <div class="cmeta"><span class="tag">Due <b>${fmt(r.puspakomDue)}</b></span><span class="tag">Insp <b>${fmt(r.inspectionDate)}</b></span>
       <span class="tag" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;<b style="color:${RUNNER_COLOR[r.runner]}">${r.runner}</b></span>
       <span class="tag">RM<b>${+r.ourCharge||0}</b></span></div>
@@ -1196,7 +1196,7 @@ function renderSheet(){
 
      <div class="sect"><label class="h">1 · Company Details</label>
        <div class="grid2">${field('Company name','f_company',r.company)}${field('Client type','f_clientType',r.clientType||'Corporate','select',['Corporate','Individual','Government','Other'])}</div>
-       ${field('WA group name · 公司共用','f_waGroupName',r.waGroupName)}
+       ${field('WA group name · shared company-wide','f_waGroupName',r.waGroupName)}
        <label class="ck ${r.puspakomOnly?'done':''}" onclick="event.preventDefault();toggleCk('puspakomOnly')"><input type="checkbox" ${r.puspakomOnly?'checked':''}> Puspakom only (no road tax / insurance handled)</label></div>
 
      <div class="sect"><label class="h">2 · Vehicle Details</label>
@@ -1210,8 +1210,8 @@ function renderSheet(){
        ${r.inspectionDate!==insAuto?`<div class="auto-note">Suggested: ${fmt(insAuto)} <a href="#" onclick="useAuto(event)">Apply</a></div>`:`<div class="hint">Auto-set ~${BUFFER_DAYS} days before due (skips weekends, holidays &amp; full runner days). You may inspect up to 30 days before due.</div>`}
        <div class="grid2">${field('Runner','f_runner',r.runner,'select',RUNNERS)}${field('Inspection type','f_inspectionType',r.inspectionType,'select',ITYPES)}</div>
        ${r.inspectionType==='B2'?field('B2 inspection details','f_b2Remark',r.b2Remark):''}
-       ${field('Address of collect lorry · 公司共用','f_pickupAddress',r.pickupAddress,'textarea')}
-       <div class="grid2">${field('PIC name · 公司共用','f_picName',r.picName)}${field('PIC contact · 公司共用','f_customerContact',r.customerContact)}</div>
+       ${field('Address of collect lorry · shared company-wide','f_pickupAddress',r.pickupAddress,'textarea')}
+       <div class="grid2">${field('PIC name · shared company-wide','f_picName',r.picName)}${field('PIC contact · shared company-wide','f_customerContact',r.customerContact)}</div>
        ${linkField('Test card PDF','f_testCardLink',r.testCardLink)}</div>
 
      <div class="sect"><label class="h">4 · Inspection Fee</label>
@@ -1298,7 +1298,7 @@ function fillCompanyFieldsFromExisting(rec){
   if(!src)return;
   COMPANY_FIELDS.forEach(f=>{if((!rec[f]||String(rec[f]).trim()==='')&&src[f])rec[f]=src[f];});
 }
-function saveSheet(){const r=readSheet();const n=r?syncCompanyFields(r):0;save();renderSheet();render();toast(n>0?('Saved · 已同步 '+n+' 辆同公司车辆'):'Saved')}
+function saveSheet(){const r=readSheet();const n=r?syncCompanyFields(r):0;save();renderSheet();render();toast(n>0?('Saved · synced '+n+' other vehicle(s) for this company'):'Saved')}
 function useAuto(e){e.preventDefault();const r=readSheet();r.inspectionDate=calcInspection(r.puspakomDue,r.runner,r.id);save();renderSheet();render();toast('Applied suggested date')}
 function toggleCk(f){const r=readSheet();r[f]=!r[f];save();renderSheet();render()}
 function passDate(r){return (r.retestDate&&r.retestDate>(r.inspectionDate||''))?r.retestDate:(r.inspectionDate||'')}
@@ -1340,7 +1340,7 @@ function renderNewArrangeRunner(){
        <div class="grid2">${field('Vehicle no','n_plate','')}${field('Client type','n_clientType','Corporate','select',['Corporate','Individual','Government','Other'])}</div>
        <div class="grid3">${field('Puspakom due','n_puspakomDue','','date')}${field('Roadtax due','n_roadtaxDue','','date')}${field('Insurance due','n_insuranceDue','','date')}</div>
        ${field('Inspection type','n_inspectionType','BERKALA','select',ITYPES)}
-       ${field('WA group name · 公司共用','n_waGroupName','')}
+       ${field('WA group name · shared company-wide','n_waGroupName','')}
        <div class="grid2">${field('Quotation no','n_quotationNo','')}${field('Our charge (RM)','n_ourCharge','330','number')}</div>
        <div class="auto-note" id="n_preview">The inspection date is auto-calculated. Assign the runner later in Arrangement Details.</div></div>
      <div class="sect"><label class="h">Already arranged? (optional — leave as-is for a brand-new unarranged job)</label>
