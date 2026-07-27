@@ -617,26 +617,31 @@ function ensureDriveToken(){
     driveTokenClient.requestAccessToken({prompt:driveAccessToken?'':'consent'});
   });
 }
-async function driveFindOrCreateFolder(name,parentId,token){
-  const safe=name.replace(/'/g,"\\'");
-  const q=encodeURIComponent(`name='${safe}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
-  const res=await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`,{headers:{Authorization:'Bearer '+token}});
-  if(!res.ok)throw new Error('Drive folder lookup failed: '+res.status);
-  const data=await res.json();
-  if(data.files&&data.files.length)return data.files[0].id;
+// drive.file scope only grants create/write access to a picker-selected
+// folder — it does NOT allow files.list/search queries against it (that
+// needs a broader scope). So instead of searching for an existing
+// year/month folder before creating it, we create it once and remember its
+// ID locally (per browser) so we never need to search for it again.
+function driveFolderCacheKey(name,parentId){return 'vr1folder_'+parentId+'_'+name}
+async function driveGetOrCreateChildFolder(name,parentId,token){
+  const cacheKey=driveFolderCacheKey(name,parentId);
+  const cached=localStorage.getItem(cacheKey);
+  if(cached)return cached;
   const createRes=await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',
     headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
     body:JSON.stringify({name,mimeType:'application/vnd.google-apps.folder',parents:[parentId]})});
   if(!createRes.ok)throw new Error('Drive folder create failed: '+createRes.status);
-  const created=await createRes.json();return created.id;
+  const created=await createRes.json();
+  localStorage.setItem(cacheKey,created.id);
+  return created.id;
 }
 async function getDriveYearMonthFolder(dueISO,token){
   const rootId=getVR1FolderId();
   if(!rootId)throw new Error('No VR1 folder selected yet — click "Select VR1 Folder" in the sidebar first');
   const d=dueISO?parseISO(dueISO):new Date();
   const year=String(d.getFullYear()),month=String(d.getMonth()+1).padStart(2,'0');
-  const yearId=await driveFindOrCreateFolder(year,rootId,token);
-  return driveFindOrCreateFolder(month,yearId,token);
+  const yearId=await driveGetOrCreateChildFolder(year,rootId,token);
+  return driveGetOrCreateChildFolder(month,yearId,token);
 }
 async function driveUploadFile(file,filename,parentId,token){
   const boundary='-------vr1upload'+Date.now();
