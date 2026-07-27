@@ -249,6 +249,11 @@ body{
 .chev{color:var(--ink-faint);font-size:18px}
 .mini{border:0;cursor:pointer;font:inherit;font-size:12px;font-weight:600;padding:9px 14px;border-radius:11px;transition:.2s}
 .import-rep{margin-top:10px}
+.vr1-list{margin-bottom:8px}
+.vr1-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;font-size:12.5px;background:rgba(255,255,255,.5)}
+.vr1-item a{color:var(--accent);font-weight:650;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vr1-item .vr1-date{color:var(--ink-faint);font-size:11px;flex-shrink:0}
+.vr1-del{border:0;background:rgba(177,111,98,.14);color:var(--s-fail);width:22px;height:22px;border-radius:50%;cursor:pointer;font-size:11px;flex-shrink:0}
 .import-btn{display:block;width:100%;text-align:center;background:var(--navy);color:#fff;box-shadow:var(--shadow)}
 .import-btn:hover{opacity:.88}
 .mini.go{background:linear-gradient(145deg,#4a72a8,#345788);color:#fff}.mini.go:hover{transform:translateY(-1px)}
@@ -294,6 +299,9 @@ body{
 .sheet-h h2{font-size:19px;font-weight:700;letter-spacing:-.3px;color:var(--navy)}
 .sheet-h .sub{font-size:12.5px;color:var(--ink-soft);margin-top:1px}
 .x{border:0;background:rgba(40,70,110,.1);width:34px;height:34px;border-radius:50%;cursor:pointer;font-size:17px;color:var(--ink-soft);transition:.2s}
+.sheet-h-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.hsave{border:0;cursor:pointer;font:inherit;font-size:13px;font-weight:650;color:#fff;padding:9px 16px;border-radius:11px;background:linear-gradient(145deg,#4a72a8,#345788);box-shadow:0 4px 12px rgba(44,74,115,.28);transition:.2s}
+.hsave:hover{transform:translateY(-1px)}.hsave:active{transform:scale(.97)}
 .x:hover{background:rgba(40,70,110,.18)}
 .sheet-b{padding:20px 22px 50px}
 .sect{margin-bottom:14px;background:rgba(255,255,255,.5);border:1px solid var(--line);border-radius:16px;padding:15px 16px 5px;box-shadow:0 1px 3px rgba(22,39,63,.04)}
@@ -395,11 +403,13 @@ input[type=file]{display:none}
     <div class="nav-i" data-v="pipe" onclick="switchView('pipe')"><span class="ic">▥</span> Pipeline <span class="badge" id="fuBadge" style="display:none"></span></div>
     <div class="nav-i" data-v="pay" onclick="switchView('pay')"><span class="ic">💲</span> Payment <span class="badge" id="payBadge" style="display:none"></span></div>
     <div class="nav-i" data-v="cal" onclick="switchView('cal')"><span class="ic">▤</span> Calendar</div>
-    <button class="sb-new" onclick="openNew()">＋ New Record</button>
+    <button class="sb-new" onclick="openNew('runner')">＋ New Record</button>
     <div class="sb-foot">
       <button onclick="exportData()">⬇︎ Backup</button>
       <button onclick="document.getElementById('imp').click()">⬆︎ Restore</button>
       <input type="file" id="imp" accept=".json" onchange="importData(event)">
+      <button onclick="connectDrive()" title="Connect your Google account so uploaded VR1 reports sync to Drive">🔗 Connect Drive</button>
+      <div class="hint" id="driveStatus" style="text-align:center">⚪ Drive not connected</div>
       <div class="whoami" id="whoAmI" onclick="askName()" title="Click to set your name">Set your name</div>
     </div>
   </nav>
@@ -421,6 +431,8 @@ input[type=file]{display:none}
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
 <script>
 const HOLIDAYS={
  '2026-01-01':'New Year','2026-02-01':'Thaipusam','2026-02-02':'Thaipusam Holiday',
@@ -489,7 +501,7 @@ function calcInspection(due,runner,ex){if(!due)return'';let d=parseISO(due);d.se
   for(let i=0;i<160;i++){const iso=toISO(d);if(!isWE(d)&&!isHol(iso)&&hasCapacity(runner,iso,ex))return iso;d.setDate(d.getDate()-1);}return toISO(d)}
 
 const KEY='puspakom_dashboard_v2';
-let DATA=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report';
+let DATA=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report',newRecordMode='runner';
 let fltYear=new Date().getFullYear(),fltMonth='all',fltBasis='due',showHold=false,showSales=false,fltCompany='';
 let mSortKey=null,mSortDir=1;
 function setMSort(key){if(mSortKey===key){mSortDir=-mSortDir}else{mSortKey=key;mSortDir=1}render()}
@@ -510,6 +522,147 @@ const SUPABASE_URL='https://lxjtwkxgxwojtltfdugj.supabase.co';
 const SUPABASE_ANON_KEY='sb_publishable_ZoX2XxOdZKAdpQvExq3SpA_ixtWw-db';
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 let currentRev=0,dirtyPending=false,savingInFlight=false,pollTimer=null;
+
+// ---- Google Drive integration (VR1 report auto-upload) -----------------
+// ONE-TIME SETUP NEEDED before this feature works — ask whoever manages the
+// company Google account to do this once:
+//   1. Go to https://console.cloud.google.com/ · create a project (any name).
+//   2. APIs & Services → Library → enable "Google Drive API".
+//   3. APIs & Services → OAuth consent screen → User type "External" →
+//      fill the required fields → Publishing status can stay "Testing" →
+//      under "Test users" add every @gmail/company email that will use this
+//      app (this avoids Google's app-review process; tokens still work fine).
+//   4. APIs & Services → Credentials → Create Credentials → OAuth client ID →
+//      Application type "Web application" → Authorized JavaScript origins:
+//      add this site's URL (e.g. https://your-site.netlify.app) and, for
+//      local testing, http://localhost:<port>. Save, then copy the Client ID.
+//   5. In Google Drive, open the "Puspakom VR1 Report" folder → its URL is
+//      https://drive.google.com/drive/folders/<FOLDER_ID> → copy FOLDER_ID.
+//   6. Paste both values below, replacing the two PASTE_… placeholders.
+const DRIVE_CLIENT_ID='PASTE_YOUR_GOOGLE_OAUTH_CLIENT_ID_HERE';
+const DRIVE_ROOT_FOLDER_ID='PASTE_YOUR_PUSPAKOM_VR1_REPORT_FOLDER_ID_HERE';
+const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+let driveTokenClient=null,driveAccessToken=null,driveTokenExpiry=0;
+function driveReady(){return !!DRIVE_CLIENT_ID&&!DRIVE_CLIENT_ID.startsWith('PASTE_')&&!!DRIVE_ROOT_FOLDER_ID&&!DRIVE_ROOT_FOLDER_ID.startsWith('PASTE_')}
+function updateDriveStatusUI(){const el=document.getElementById('driveStatus');if(!el)return;
+  el.textContent=!driveReady()?'⚪ Drive not set up (see code)':(driveAccessToken&&Date.now()<driveTokenExpiry?'🟢 Drive connected':'⚪ Drive not connected')}
+function initDriveAuth(){
+  if(!driveReady()||!window.google||!google.accounts||driveTokenClient)return;
+  driveTokenClient=google.accounts.oauth2.initTokenClient({client_id:DRIVE_CLIENT_ID,scope:DRIVE_SCOPE,callback:()=>{}});
+}
+function connectDrive(){
+  if(!driveReady()){toast('Google Drive isn\'t configured yet — see setup notes at the top of the script');return}
+  if(!driveTokenClient)initDriveAuth();
+  if(!driveTokenClient){toast('Google sign-in script hasn\'t loaded yet — try again in a moment');return}
+  driveTokenClient.callback=(resp)=>{
+    if(resp.error){toast('Google Drive connection failed: '+resp.error);return}
+    driveAccessToken=resp.access_token;driveTokenExpiry=Date.now()+(resp.expires_in||3600)*1000-30000;
+    updateDriveStatusUI();toast('Google Drive connected ✓');
+  };
+  driveTokenClient.requestAccessToken({prompt:driveAccessToken?'':'consent'});
+}
+function ensureDriveToken(){
+  if(driveAccessToken&&Date.now()<driveTokenExpiry)return Promise.resolve(driveAccessToken);
+  return new Promise((resolve,reject)=>{
+    if(!driveReady()){reject(new Error('Drive not configured'));return}
+    if(!driveTokenClient)initDriveAuth();
+    if(!driveTokenClient){reject(new Error('Google sign-in script not ready'));return}
+    driveTokenClient.callback=(resp)=>{
+      if(resp.error){reject(new Error(resp.error));return}
+      driveAccessToken=resp.access_token;driveTokenExpiry=Date.now()+(resp.expires_in||3600)*1000-30000;
+      updateDriveStatusUI();resolve(driveAccessToken);
+    };
+    driveTokenClient.requestAccessToken({prompt:driveAccessToken?'':'consent'});
+  });
+}
+async function driveFindOrCreateFolder(name,parentId,token){
+  const safe=name.replace(/'/g,"\\'");
+  const q=encodeURIComponent(`name='${safe}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const res=await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`,{headers:{Authorization:'Bearer '+token}});
+  if(!res.ok)throw new Error('Drive folder lookup failed: '+res.status);
+  const data=await res.json();
+  if(data.files&&data.files.length)return data.files[0].id;
+  const createRes=await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',
+    headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify({name,mimeType:'application/vnd.google-apps.folder',parents:[parentId]})});
+  if(!createRes.ok)throw new Error('Drive folder create failed: '+createRes.status);
+  const created=await createRes.json();return created.id;
+}
+async function getDriveYearMonthFolder(dueISO,token){
+  const d=dueISO?parseISO(dueISO):new Date();
+  const year=String(d.getFullYear()),month=String(d.getMonth()+1).padStart(2,'0');
+  const yearId=await driveFindOrCreateFolder(year,DRIVE_ROOT_FOLDER_ID,token);
+  return driveFindOrCreateFolder(month,yearId,token);
+}
+async function driveUploadFile(file,filename,parentId,token){
+  const boundary='-------vr1upload'+Date.now();
+  const metaPart=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({name:filename,parents:[parentId]})}\r\n`;
+  const fileBuf=await file.arrayBuffer();
+  const body=new Blob([metaPart,`--${boundary}\r\nContent-Type: application/pdf\r\n\r\n`,fileBuf,`\r\n--${boundary}--`]);
+  const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',{
+    method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':`multipart/related; boundary=${boundary}`},body});
+  if(!res.ok)throw new Error('Drive upload failed: '+res.status);
+  return res.json();
+}
+async function extractPdfText(file){
+  if(!window.pdfjsLib)return'';
+  try{
+    pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.worker.min.js';
+    const buf=await file.arrayBuffer();
+    const doc=await pdfjsLib.getDocument({data:buf}).promise;
+    let text='';
+    for(let i=1;i<=doc.numPages;i++){const page=await doc.getPage(i);const content=await page.getTextContent();text+=content.items.map(it=>it.str).join(' ')+'\n';}
+    return text;
+  }catch(e){return''}
+}
+function vr1ListHTML(r){
+  const list=(r.puspakomReports&&r.puspakomReports.length)?r.puspakomReports:(r.puspakomReportLink?[{name:'Report',url:r.puspakomReportLink,uploadedAt:''}]:[]);
+  if(!list.length)return '<div class="hint">No VR1 report uploaded yet.</div>';
+  return list.map((f,i)=>`<div class="vr1-item"><a href="${f.url}" target="_blank" rel="noopener">📄 ${f.name||('Report '+(i+1))}</a>${f.uploadedAt?`<span class="vr1-date">${f.uploadedAt}</span>`:''}<button type="button" class="vr1-del" title="Remove (does not delete from Drive)" onclick="removeVR1Report('${r.id}',${i})">✕</button></div>`).join('');
+}
+function removeVR1Report(id,idx){const r=get(id);if(!r)return;if(!confirm('Remove this from the list? The file stays in Drive.'))return;
+  if(r.puspakomReports&&r.puspakomReports.length)r.puspakomReports.splice(idx,1);else r.puspakomReportLink='';
+  save();renderSheet();render();}
+async function handleVR1Upload(e){
+  const files=Array.from(e.target.files||[]);e.target.value='';
+  if(!files.length)return;
+  const r=get(openId);if(!r){toast('Open a vehicle record first');return}
+  if(!driveReady()){toast('Google Drive isn\'t set up yet — see setup notes at the top of the script');return}
+  const statusEl=document.getElementById('vr1UploadStatus');if(statusEl)statusEl.style.display='block';
+  let token;
+  try{ if(statusEl)statusEl.textContent='Connecting to Google Drive…'; token=await ensureDriveToken(); }
+  catch(err){ toast('Could not connect to Google Drive'); if(statusEl)statusEl.style.display='none'; return }
+  for(const file of files){
+    if(statusEl)statusEl.textContent='Reading '+file.name+'…';
+    const text=await extractPdfText(file);
+    const info=text?parseReportText(text):{};
+    if(info.decisionNo)r.reportDecisionNo=info.decisionNo;
+    if(info.plate&&r.plate&&info.plate.replace(/\s/g,'')!==r.plate.replace(/\s/g,'')){
+      toast('⚠️ '+file.name+' looks like plate '+info.plate+', not '+r.plate+' — uploaded anyway, please check');
+    }
+    const dueForFolder=(info.passed&&info.renewalDue)?info.renewalDue:(r.puspakomDue||'');
+    try{
+      if(statusEl)statusEl.textContent='Uploading '+file.name+' to Drive…';
+      const folderId=await getDriveYearMonthFolder(dueForFolder,token);
+      const uploaded=await driveUploadFile(file,file.name,folderId,token);
+      r.puspakomReports=r.puspakomReports||[];
+      r.puspakomReports.push({name:file.name,url:uploaded.webViewLink||('https://drive.google.com/file/d/'+uploaded.id+'/view'),uploadedAt:nowStamp()});
+    }catch(err){
+      toast('❌ Upload failed for '+file.name+': '+((err&&err.message)||'unknown error'));
+      continue;
+    }
+    if(info.passed&&info.renewalDue){
+      r.status='PASS';r.renewalDue=info.renewalDue;
+      r.history=r.history||[];r.history.push({s:'PASS',t:nowStamp()});
+      save();openId=r.id;renderSheet();
+      confirmPass();
+      toast('✅ '+file.name+' — Inspection Passed · next due '+fmt(info.renewalDue));
+    }
+  }
+  save();renderSheet();render();
+  if(statusEl)statusEl.style.display='none';
+}
+window.addEventListener('load',()=>{updateDriveStatusUI();setTimeout(initDriveAuth,300)});
 function migrate(){DATA.forEach(r=>{if(r.status==='REMINDER_SENT')r.status='REMINDER_1';if(RUNNER_MIGRATE[r.runner])r.runner=RUNNER_MIGRATE[r.runner]});}
 
 async function loadFromServer(){
@@ -582,7 +735,7 @@ function get(id){return DATA.find(r=>r.id===id)}
 
 function seed(){
   const mk=o=>Object.assign({id:uid(),roadtaxDue:'',insuranceDue:'',clientType:'Corporate',puspakomOnly:false,paymentStatus:'Not set',picName:'',
-    testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',waGroupName:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runnerRemark:'',b2Remark:'',quotationNo:'',invoiceNo:'',
+    testCardLink:'',puspakomReportLink:'',puspakomReports:[],bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',waGroupName:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runnerRemark:'',b2Remark:'',quotationNo:'',invoiceNo:'',
     ourCharge:330,runnerCharge:0,testCardFee:0,additionalAmount:0,additionalReason:'',renewalDue:'',
     geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,manualChecked:false,
     paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
@@ -1033,7 +1186,7 @@ function renderSheet(){
   const r=get(openId);if(!r)return;const isPass=r.status==='PASS';
   const insAuto=calcInspection(r.puspakomDue,r.runner,r.id);
   document.getElementById('sheetContent').innerHTML=`
-   <div class="sheet-h"><div><h2>${r.plate}</h2><div class="sub">${r.company}</div></div><button class="x" onclick="closeSheet()">✕</button></div>
+   <div class="sheet-h"><div><h2>${r.plate}</h2><div class="sub">${r.company}</div></div><div class="sheet-h-actions"><button class="hsave" onclick="saveSheet()">💾 Save</button><button class="x" onclick="closeSheet()">✕</button></div></div>
    <div class="sheet-b">
      <div class="sect"><label class="h">Status · auto record date &amp; time</label>
        ${field('Current status','f_status',r.status?STATUS[r.status].l:'','select',STATUS_ORDER.map(k=>STATUS[k].l))}
@@ -1048,7 +1201,9 @@ function renderSheet(){
 
      <div class="sect"><label class="h">2 · Vehicle Details</label>
        <div class="grid2">${field('Vehicle no','f_plate',r.plate)}${field('Puspakom branch','f_puspakomBranch',r.puspakomBranch||'Mak Mandin','select',['Mak Mandin','Batu Maung','Teluk Kumbar'])}</div>
-       <div class="grid3">${field('Puspakom due','f_puspakomDue',r.puspakomDue,'date')}${field('Roadtax due','f_roadtaxDue',r.roadtaxDue,'date')}${field('Insurance due','f_insuranceDue',r.insuranceDue,'date')}</div></div>
+       <div class="grid3">${field('Puspakom due','f_puspakomDue',r.puspakomDue,'date')}${field('Roadtax due','f_roadtaxDue',r.roadtaxDue,'date')}${field('Insurance due','f_insuranceDue',r.insuranceDue,'date')}</div>
+       ${(r.runner==='BOOKING ONLY'||r.clientConfirmDate||r.carrierName||r.icNumber)?`<div class="grid2">${field('Date of client confirm','f_clientConfirmDate',r.clientConfirmDate,'date')}${field('IC number','f_icNumber',r.icNumber)}</div>
+       ${field('Name of person carrying vehicle to Puspakom','f_carrierName',r.carrierName)}`:''}</div>
 
      <div class="sect"><label class="h">3 · Arrangement Details</label>
        ${field('Arrangement / inspection date','f_inspectionDate',r.inspectionDate,'date')}
@@ -1076,7 +1231,12 @@ function renderSheet(){
          <label class="ck ${r.discReceived?'done':''}" onclick="event.preventDefault();toggleCk('discReceived')"><input type="checkbox" ${r.discReceived?'checked':''}> Puspakom Disc</label>
          <label class="ck ${r.runnerInvoiceReceived?'done':''}" onclick="event.preventDefault();toggleCk('runnerInvoiceReceived')"><input type="checkbox" ${r.runnerInvoiceReceived?'checked':''}> Runner bill (needed before paying runner)</label></div>
        ${linkField('Puspakom Booking Slip PDF (📄 press Open to view — links to Drive)','f_bookingSlipLink',r.bookingSlipLink)}
-       ${linkField('Puspakom Report PDF (📄 press Open to view — links to Drive)','f_puspakomReportLink',r.puspakomReportLink)}
+       <div class="fld"><label>Puspakom VR1 Report PDF (📄 press Open to view — auto-synced to Drive)</label>
+         <div class="vr1-list">${vr1ListHTML(r)}</div>
+         <input type="file" id="vr1FileInput" accept="application/pdf" multiple style="display:none" onchange="handleVR1Upload(event)">
+         <button type="button" class="mini import-btn" onclick="document.getElementById('vr1FileInput').click()">📤 Upload VR1 report PDF</button>
+         <div id="vr1UploadStatus" class="hint" style="display:none;margin-top:6px"></div>
+       </div>
        <div class="import-rep">
          <button type="button" class="mini import-btn" onclick="openReportPaste()">📋 Paste Puspakom report text — auto-fills due date &amp; status</button>
          <div id="reportPasteBox" style="display:none;margin-top:8px">
@@ -1096,8 +1256,7 @@ function renderSheet(){
            :`<button class="bigbtn green" onclick="confirmPass()">Confirm done · add to Payment + create next cycle</button>`}`:''}</div>
 
 
-     <button class="bigbtn ghost" onclick="saveSheet()">Save changes</button>
-     <button class="bigbtn danger" style="margin-top:8px" onclick="delRecord('${r.id}')">Delete this record</button>
+     <button class="bigbtn danger" onclick="delRecord('${r.id}')">Delete this record</button>
    </div>`;
 }
 function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=document.getElementById(id);return e?e.value:undefined};
@@ -1106,6 +1265,7 @@ function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=
   r.status=ns;
   const map={f_company:'company',f_plate:'plate',f_puspakomDue:'puspakomDue',f_roadtaxDue:'roadtaxDue',f_insuranceDue:'insuranceDue',f_inspectionDate:'inspectionDate',
     f_clientType:'clientType',f_paymentStatus:'paymentStatus',f_picName:'picName',f_testCardLink:'testCardLink',f_puspakomReportLink:'puspakomReportLink',f_bookingSlipLink:'bookingSlipLink',f_puspakomBranch:'puspakomBranch',f_waGroupName:'waGroupName',
+    f_clientConfirmDate:'clientConfirmDate',f_carrierName:'carrierName',f_icNumber:'icNumber',
     f_b2Remark:'b2Remark',f_quotationNo:'quotationNo',f_invoiceNo:'invoiceNo',f_customerContact:'customerContact',f_pickupAddress:'pickupAddress',
     f_remark:'remark',f_additionalReason:'additionalReason',f_failItems:'failItems',f_retestDate:'retestDate',f_onHoldReason:'onHoldReason',f_renewalDue:'renewalDue'};
   for(const k in map){const v=g(k);if(v!==undefined)r[map[k]]=v}
@@ -1146,7 +1306,7 @@ function computeRenewal(r){const due=r.puspakomDue||'',pd=passDate(r);const anch
 function createNextCycle(r){
   const nd=r.renewalDue||computeRenewal(r);
   const n={id:uid(),company:r.company,plate:r.plate,puspakomDue:nd,roadtaxDue:r.roadtaxDue,insuranceDue:r.insuranceDue,runner:r.runner,inspectionType:r.inspectionType,
-    clientType:r.clientType,puspakomOnly:r.puspakomOnly,picName:r.picName,paymentStatus:'Not set',testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',waGroupName:'',
+    clientType:r.clientType,puspakomOnly:r.puspakomOnly,picName:r.picName,paymentStatus:'Not set',testCardLink:'',puspakomReportLink:'',puspakomReports:[],bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',waGroupName:'',
     salesInsuranceHandled:false,salesRoadtaxHandled:false,
     b2Remark:r.b2Remark,quotationNo:'',invoiceNo:'',ourCharge:r.ourCharge,runnerCharge:0,testCardFee:0,additionalAmount:0,additionalReason:'',
     renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,manualChecked:false,
@@ -1164,35 +1324,56 @@ document.addEventListener('change',e=>{if(!e.target)return;
   else if(e.target.id==='f_inspectionType'){readSheet();save();renderSheet()}
   else if(e.target.id==='f_additionalAmount'){readSheet();save();renderSheet()}});
 
-function openNew(){
-  document.getElementById('sheetContent').innerHTML=`<div class="sheet-h"><div><h2>New Record</h2><div class="sub">New job passed from sales — to arrange, or already arranged, just record it</div></div><button class="x" onclick="closeSheet()">✕</button></div>
-   <div class="sheet-b"><div class="sect"><label class="h">New vehicle</label>
+function openNew(mode){newRecordMode=mode||newRecordMode||'runner';renderNewSheet();showSheet()}
+function switchNewMode(m){newRecordMode=m;renderNewSheet()}
+function newModeToggle(){return `<div class="seg" style="margin-bottom:14px">
+    <button class="${newRecordMode==='runner'?'on':''}" onclick="switchNewMode('runner')">🚐 Arrange Runner</button>
+    <button class="${newRecordMode==='booking'?'on':''}" onclick="switchNewMode('booking')">📋 Booking Only</button></div>`}
+function renderNewSheet(){
+  document.getElementById('sheetContent').innerHTML = newRecordMode==='booking'?renderNewBookingOnly():renderNewArrangeRunner();
+  if(newRecordMode==='runner')document.getElementById('n_puspakomDue').addEventListener('change',previewNew);
+}
+function renderNewArrangeRunner(){
+  return `<div class="sheet-h"><div><h2>New Record</h2><div class="sub">New job passed from sales — to arrange, or already arranged, just record it</div></div><button class="x" onclick="closeSheet()">✕</button></div>
+   <div class="sheet-b">${newModeToggle()}<div class="sect"><label class="h">New vehicle</label>
        ${field('Company name','n_company','')}
        <div class="grid2">${field('Vehicle no','n_plate','')}${field('Client type','n_clientType','Corporate','select',['Corporate','Individual','Government','Other'])}</div>
        <div class="grid3">${field('Puspakom due','n_puspakomDue','','date')}${field('Roadtax due','n_roadtaxDue','','date')}${field('Insurance due','n_insuranceDue','','date')}</div>
        ${field('Inspection type','n_inspectionType','BERKALA','select',ITYPES)}
-       <label class="ck"><input type="checkbox" id="n_bookingOnly"> Booking only — customer inspects themselves (no runner needed)</label>
+       ${field('WA group name · 公司共用','n_waGroupName','')}
        <div class="grid2">${field('Quotation no','n_quotationNo','')}${field('Our charge (RM)','n_ourCharge','330','number')}</div>
-       <div class="auto-note" id="n_preview">If we arrange a runner, the inspection date is auto-calculated. Assign the runner later in Arrangement Details.</div></div>
+       <div class="auto-note" id="n_preview">The inspection date is auto-calculated. Assign the runner later in Arrangement Details.</div></div>
      <div class="sect"><label class="h">Already arranged? (optional — leave as-is for a brand-new unarranged job)</label>
        <div class="grid2">${field('Current status','n_status',STATUS.READY_TO_CONTACT.l,'select',STATUS_ORDER.map(k=>STATUS[k].l))}${field('Actual inspection date (if known)','n_actualInspectionDate','','date')}</div>
        <div class="hint">Set these if the case is already booked / confirmed / passed etc. — this skips the auto-calculated suggestion and records exactly what you enter.</div></div>
      <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
-  showSheet();document.getElementById('n_puspakomDue').addEventListener('change',previewNew);
 }
-function previewNew(){const due=document.getElementById('n_puspakomDue').value,bk=document.getElementById('n_bookingOnly').checked,p=document.getElementById('n_preview');
-  if(due){const iso=calcInspection(due,bk?'BOOKING ONLY':'MR LEE','_new');p.innerHTML='Suggested inspection date: <b>'+fmt(iso)+'</b> (skips weekends · holidays)'}}
-function addNew(){const g=id=>document.getElementById(id).value;
+function renderNewBookingOnly(){
+  return `<div class="sheet-h"><div><h2>New Record</h2><div class="sub">Booking only — customer inspects themselves, no runner needed</div></div><button class="x" onclick="closeSheet()">✕</button></div>
+   <div class="sheet-b">${newModeToggle()}<div class="sect"><label class="h">Booking details</label>
+       ${field('Company name','n_company','')}
+       ${field('Vehicle no','n_plate','')}
+       <div class="grid2">${field('Puspakom due','n_puspakomDue','','date')}${field('Roadtax due','n_roadtaxDue','','date')}</div>
+       ${field('Date of client confirm','n_clientConfirmDate','','date')}
+       ${field('Name of person carrying vehicle to Puspakom','n_carrierName','')}
+       <div class="grid2">${field('IC number','n_icNumber','')}${field('Phone number','n_customerContact','')}</div>
+       ${field('Quotation / Invoice number','n_quotationNo','')}</div>
+     <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
+}
+function previewNew(){const due=document.getElementById('n_puspakomDue').value,p=document.getElementById('n_preview');
+  if(due&&p){const iso=calcInspection(due,'MR LEE','_new');p.innerHTML='Suggested inspection date: <b>'+fmt(iso)+'</b> (skips weekends · holidays)'}}
+function addNew(){const g=id=>{const e=document.getElementById(id);return e?e.value:''};
+  const bk=newRecordMode==='booking';
   if(!g('n_plate').trim()||!g('n_puspakomDue')){toast('Please enter at least vehicle no and Puspakom due');return}
-  const bk=document.getElementById('n_bookingOnly').checked;
-  const statusKey=STATUS_LABEL_TO_KEY[g('n_status')]||'READY_TO_CONTACT';
+  const statusKey=bk?'READY_TO_CONTACT':(STATUS_LABEL_TO_KEY[g('n_status')]||'READY_TO_CONTACT');
   const actualDate=g('n_actualInspectionDate');
   const r={id:uid(),company:g('n_company').trim()||'(no company)',plate:g('n_plate').trim().toUpperCase(),puspakomDue:g('n_puspakomDue'),
-    roadtaxDue:g('n_roadtaxDue'),insuranceDue:g('n_insuranceDue'),clientType:g('n_clientType'),puspakomOnly:false,paymentStatus:'Not set',picName:'',
-    testCardLink:'',puspakomReportLink:'',bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',waGroupName:'',salesInsuranceHandled:false,salesRoadtaxHandled:false,runner:bk?'BOOKING ONLY':'MR LEE',inspectionType:g('n_inspectionType'),b2Remark:'',
+    roadtaxDue:g('n_roadtaxDue'),insuranceDue:g('n_insuranceDue'),clientType:g('n_clientType')||'Corporate',puspakomOnly:false,paymentStatus:'Not set',picName:'',
+    testCardLink:'',puspakomReportLink:'',puspakomReports:[],bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',waGroupName:g('n_waGroupName'),salesInsuranceHandled:false,salesRoadtaxHandled:false,runner:bk?'BOOKING ONLY':'MR LEE',inspectionType:g('n_inspectionType')||'BERKALA',b2Remark:'',
     quotationNo:g('n_quotationNo').trim(),invoiceNo:'',ourCharge:+g('n_ourCharge')||330,runnerCharge:0,testCardFee:0,additionalAmount:0,
     additionalReason:'',renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,
-    manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
+    manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:g('n_customerContact').trim(),pickupAddress:'',
+    clientConfirmDate:g('n_clientConfirmDate'),carrierName:g('n_carrierName').trim(),icNumber:g('n_icNumber').trim(),
     remark:'',status:statusKey,contactedDate:(statusKey!=='PENDING_CONTACT'&&statusKey!=='READY_TO_CONTACT')?toISO(new Date()):'',renewalCreated:false,nextId:'',prevId:'',demo:false,isNew:true,history:[{s:statusKey,t:nowStamp()}]};
   r.inspectionDate=actualDate||calcInspection(r.puspakomDue,r.runner,r.id);
   fillCompanyFieldsFromExisting(r);DATA.push(r);save();closeSheet();switchView('master');toast('Added '+r.plate)}
