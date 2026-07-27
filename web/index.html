@@ -409,6 +409,7 @@ input[type=file]{display:none}
       <button onclick="document.getElementById('imp').click()">⬆︎ Restore</button>
       <input type="file" id="imp" accept=".json" onchange="importData(event)">
       <button onclick="connectDrive()" title="Connect your Google account so uploaded VR1 reports sync to Drive">🔗 Connect Drive</button>
+      <button onclick="selectVR1Folder()" title="Pick your existing Puspakom VR1 Report folder — one time only">📁 Select VR1 Folder</button>
       <div class="hint" id="driveStatus" style="text-align:center">⚪ Drive not connected</div>
       <div class="whoami" id="whoAmI" onclick="askName()" title="Click to set your name">Set your name</div>
     </div>
@@ -432,6 +433,7 @@ input[type=file]{display:none}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://apis.google.com/js/api.js" async defer></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/legacy/build/pdf.min.js"></script>
 <script>
 const HOLIDAYS={
@@ -524,10 +526,17 @@ const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 let currentRev=0,dirtyPending=false,savingInFlight=false,pollTimer=null;
 
 // ---- Google Drive integration (VR1 report auto-upload) -----------------
+// Uses the narrow "drive.file" permission (the app can only touch files/
+// folders it created OR that the user explicitly picked via the folder
+// picker below — never anything else in the Drive). Because your VR1
+// folder already existed, everyone needs to pick it once via the picker;
+// that one click is what grants this app access to that specific folder.
+//
 // ONE-TIME SETUP NEEDED before this feature works — ask whoever manages the
 // company Google account to do this once:
 //   1. Go to https://console.cloud.google.com/ · create a project (any name).
-//   2. APIs & Services → Library → enable "Google Drive API".
+//   2. APIs & Services → Library → enable "Google Drive API" AND
+//      "Google Picker API" (both, separately).
 //   3. APIs & Services → OAuth consent screen → User type "External" →
 //      fill the required fields → Publishing status can stay "Testing" →
 //      under "Test users" add every @gmail/company email that will use this
@@ -536,19 +545,32 @@ let currentRev=0,dirtyPending=false,savingInFlight=false,pollTimer=null;
 //      Application type "Web application" → Authorized JavaScript origins:
 //      add this site's URL (e.g. https://your-site.netlify.app) and, for
 //      local testing, http://localhost:<port>. Save, then copy the Client ID.
-//   5. In Google Drive, open the "Puspakom VR1 Report" folder → its URL is
-//      https://drive.google.com/drive/folders/<FOLDER_ID> → copy FOLDER_ID.
+//   5. APIs & Services → Credentials → Create Credentials → API key →
+//      click "Restrict key" → under "Website restrictions" add this site's
+//      URL → under "API restrictions" limit it to "Google Picker API".
+//      Copy the API key.
 //   6. Paste both values below, replacing the two PASTE_… placeholders.
 const DRIVE_CLIENT_ID='959507503596-dde4o0pmbt1ndvbnsprcn2bqn9fgjeib.apps.googleusercontent.com';
-const DRIVE_ROOT_FOLDER_ID='1uiWWtbFTncj5GQMmCj6lP6kosUTbeIiY';
+const DRIVE_API_KEY='AIzaSyAKeaxHaJQUcGUtguScMS1Zq6AUwX3_CWY';
 const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
-let driveTokenClient=null,driveAccessToken=null,driveTokenExpiry=0;
-function driveReady(){return !!DRIVE_CLIENT_ID&&!DRIVE_CLIENT_ID.startsWith('PASTE_')&&!!DRIVE_ROOT_FOLDER_ID&&!DRIVE_ROOT_FOLDER_ID.startsWith('PASTE_')}
+const VR1_FOLDER_KEY='vr1FolderId',VR1_FOLDER_NAME_KEY='vr1FolderName';
+let driveTokenClient=null,driveAccessToken=null,driveTokenExpiry=0,pickerLoaded=false;
+function driveReady(){return !!DRIVE_CLIENT_ID&&!DRIVE_CLIENT_ID.startsWith('PASTE_')}
+function pickerReady(){return !!DRIVE_API_KEY&&!DRIVE_API_KEY.startsWith('PASTE_')}
+function getVR1FolderId(){return localStorage.getItem(VR1_FOLDER_KEY)||''}
 function updateDriveStatusUI(){const el=document.getElementById('driveStatus');if(!el)return;
-  el.textContent=!driveReady()?'⚪ Drive not set up (see code)':(driveAccessToken&&Date.now()<driveTokenExpiry?'🟢 Drive connected':'⚪ Drive not connected')}
+  if(!driveReady()){el.textContent='⚪ Drive not set up (see code)';return}
+  if(!(driveAccessToken&&Date.now()<driveTokenExpiry)){el.textContent='⚪ Drive not connected';return}
+  const folderName=localStorage.getItem(VR1_FOLDER_NAME_KEY);
+  el.textContent=folderName?('🟢 Connected · folder: '+folderName):'🟡 Connected — pick your VR1 folder';
+}
 function initDriveAuth(){
   if(!driveReady()||!window.google||!google.accounts||driveTokenClient)return;
   driveTokenClient=google.accounts.oauth2.initTokenClient({client_id:DRIVE_CLIENT_ID,scope:DRIVE_SCOPE,callback:()=>{}});
+}
+function initPicker(){
+  if(!pickerReady()||!window.gapi||pickerLoaded)return;
+  gapi.load('picker',()=>{pickerLoaded=true});
 }
 function connectDrive(){
   if(!driveReady()){toast('Google Drive isn\'t configured yet — see setup notes at the top of the script');return}
@@ -557,9 +579,29 @@ function connectDrive(){
   driveTokenClient.callback=(resp)=>{
     if(resp.error){toast('Google Drive connection failed: '+resp.error);return}
     driveAccessToken=resp.access_token;driveTokenExpiry=Date.now()+(resp.expires_in||3600)*1000-30000;
-    updateDriveStatusUI();toast('Google Drive connected ✓');
+    updateDriveStatusUI();
+    if(!getVR1FolderId())toast('Connected ✓ — now click "Select VR1 Folder" to choose your folder');
+    else toast('Google Drive connected ✓');
   };
   driveTokenClient.requestAccessToken({prompt:driveAccessToken?'':'consent'});
+}
+function selectVR1Folder(){
+  if(!pickerReady()){toast('Folder picker isn\'t configured yet — see setup notes at the top of the script');return}
+  if(!(driveAccessToken&&Date.now()<driveTokenExpiry)){toast('Click "Connect Drive" first');return}
+  if(!pickerLoaded){initPicker();toast('Loading folder picker — try again in a moment');return}
+  const view=new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+    .setSelectFolderEnabled(true).setIncludeFolders(true).setMimeTypes('application/vnd.google-apps.folder');
+  new google.picker.PickerBuilder()
+    .setOAuthToken(driveAccessToken).setDeveloperKey(DRIVE_API_KEY)
+    .addView(view).setTitle('Select your Puspakom VR1 Report folder')
+    .setCallback(data=>{
+      if(data.action===google.picker.Action.PICKED&&data.docs&&data.docs[0]){
+        const folder=data.docs[0];
+        localStorage.setItem(VR1_FOLDER_KEY,folder.id);
+        localStorage.setItem(VR1_FOLDER_NAME_KEY,folder.name);
+        updateDriveStatusUI();toast('VR1 folder set: '+folder.name+' ✓');
+      }
+    }).build().setVisible(true);
 }
 function ensureDriveToken(){
   if(driveAccessToken&&Date.now()<driveTokenExpiry)return Promise.resolve(driveAccessToken);
@@ -589,9 +631,11 @@ async function driveFindOrCreateFolder(name,parentId,token){
   const created=await createRes.json();return created.id;
 }
 async function getDriveYearMonthFolder(dueISO,token){
+  const rootId=getVR1FolderId();
+  if(!rootId)throw new Error('No VR1 folder selected yet — click "Select VR1 Folder" in the sidebar first');
   const d=dueISO?parseISO(dueISO):new Date();
   const year=String(d.getFullYear()),month=String(d.getMonth()+1).padStart(2,'0');
-  const yearId=await driveFindOrCreateFolder(year,DRIVE_ROOT_FOLDER_ID,token);
+  const yearId=await driveFindOrCreateFolder(year,rootId,token);
   return driveFindOrCreateFolder(month,yearId,token);
 }
 async function driveUploadFile(file,filename,parentId,token){
@@ -628,6 +672,7 @@ async function handleVR1Upload(e){
   if(!files.length)return;
   const r=get(openId);if(!r){toast('Open a vehicle record first');return}
   if(!driveReady()){toast('Google Drive isn\'t set up yet — see setup notes at the top of the script');return}
+  if(!getVR1FolderId()){toast('Click "Select VR1 Folder" in the sidebar first (one-time setup)');return}
   const statusEl=document.getElementById('vr1UploadStatus');if(statusEl)statusEl.style.display='block';
   let token;
   try{ if(statusEl)statusEl.textContent='Connecting to Google Drive…'; token=await ensureDriveToken(); }
@@ -662,7 +707,7 @@ async function handleVR1Upload(e){
   save();renderSheet();render();
   if(statusEl)statusEl.style.display='none';
 }
-window.addEventListener('load',()=>{updateDriveStatusUI();setTimeout(initDriveAuth,300)});
+window.addEventListener('load',()=>{updateDriveStatusUI();setTimeout(initDriveAuth,300);setTimeout(initPicker,300)});
 function migrate(){DATA.forEach(r=>{if(r.status==='REMINDER_SENT')r.status='REMINDER_1';if(RUNNER_MIGRATE[r.runner])r.runner=RUNNER_MIGRATE[r.runner]});}
 
 async function loadFromServer(){
