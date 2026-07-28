@@ -5,7 +5,8 @@
   "description": "Puspakom Dashboard — team-shared version (Express backend + shared data store + login)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:web": "node web-server.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5",
