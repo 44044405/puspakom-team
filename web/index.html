@@ -744,7 +744,23 @@ async function handleVR1Upload(e){
   save();renderSheet();render();
   if(statusEl)statusEl.style.display='none';
 }
-window.addEventListener('load',()=>{updateDriveStatusUI();setTimeout(initDriveAuth,300);setTimeout(initPicker,300)});
+// Try to silently restore the Drive connection on page load, using the
+// consent already granted earlier, so it's not needed on every reload.
+// Best-effort only: some browsers' popup/cookie restrictions can block this
+// silent flow, in which case the person just clicks "Connect Drive" as before.
+function attemptSilentDriveReconnect(){
+  if(!driveReady()||!driveTokenClient||!getVR1FolderId())return;
+  driveTokenClient.callback=(resp)=>{
+    if(resp.error)return;
+    driveAccessToken=resp.access_token;driveTokenExpiry=Date.now()+(resp.expires_in||3600)*1000-30000;
+    updateDriveStatusUI();
+  };
+  try{driveTokenClient.requestAccessToken({prompt:''});}catch(e){}
+}
+window.addEventListener('load',()=>{
+  updateDriveStatusUI();
+  setTimeout(()=>{initDriveAuth();initPicker();attemptSilentDriveReconnect();},300);
+});
 function migrate(){DATA.forEach(r=>{if(r.status==='REMINDER_SENT')r.status='REMINDER_1';if(RUNNER_MIGRATE[r.runner])r.runner=RUNNER_MIGRATE[r.runner]});}
 
 async function loadFromServer(){
