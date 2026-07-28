@@ -625,6 +625,16 @@ function ensureDriveToken(){
 // drive.file attempt, we can now also genuinely look up an existing folder
 // (full "drive" scope allows files.list), so different browsers/devices
 // converge on the same folder instead of each creating their own.
+// Surfaces Google's actual explanation for a failed call (not just the HTTP
+// status) so real errors are diagnosable instead of a bare "403".
+async function driveErrorDetail(res){
+  try{
+    const j=await res.json();
+    const reason=j&&j.error&&j.error.errors&&j.error.errors[0]&&j.error.errors[0].reason;
+    const msg=j&&j.error&&j.error.message;
+    return [res.status,reason,msg].filter(Boolean).join(' · ');
+  }catch(e){return String(res.status)}
+}
 function driveFolderCacheKey(name,parentId){return 'vr1folder_'+parentId+'_'+name}
 async function driveGetOrCreateChildFolder(name,parentId,token){
   const cacheKey=driveFolderCacheKey(name,parentId);
@@ -636,11 +646,13 @@ async function driveGetOrCreateChildFolder(name,parentId,token){
   if(res.ok){
     const data=await res.json();
     if(data.files&&data.files.length){localStorage.setItem(cacheKey,data.files[0].id);return data.files[0].id;}
+  }else{
+    console.warn('Drive folder lookup failed (falling back to create):',await driveErrorDetail(res));
   }
   const createRes=await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',
     headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
     body:JSON.stringify({name,mimeType:'application/vnd.google-apps.folder',parents:[parentId]})});
-  if(!createRes.ok)throw new Error('Drive folder create failed: '+createRes.status);
+  if(!createRes.ok)throw new Error('Drive folder create failed: '+await driveErrorDetail(createRes));
   const created=await createRes.json();
   localStorage.setItem(cacheKey,created.id);
   return created.id;
@@ -660,7 +672,7 @@ async function driveUploadFile(file,filename,parentId,token){
   const body=new Blob([metaPart,`--${boundary}\r\nContent-Type: application/pdf\r\n\r\n`,fileBuf,`\r\n--${boundary}--`]);
   const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',{
     method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':`multipart/related; boundary=${boundary}`},body});
-  if(!res.ok)throw new Error('Drive upload failed: '+res.status);
+  if(!res.ok)throw new Error('Drive upload failed: '+await driveErrorDetail(res));
   return res.json();
 }
 async function extractPdfText(file){
