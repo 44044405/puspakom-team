@@ -666,10 +666,12 @@ async function getDriveYearMonthFolder(dueISO,token){
   const rootId=getVR1FolderId();
   if(!rootId)throw new Error('No VR1 folder selected yet — click "Select VR1 Folder" in the sidebar first');
   const d=dueISO?parseISO(dueISO):new Date();
-  const year=String(d.getFullYear()),month=String(d.getMonth()+1).padStart(2,'0');
+  const year=String(d.getFullYear()),month=MONFULL[d.getMonth()];
   const yearId=await driveGetOrCreateChildFolder(year,rootId,token);
   return driveGetOrCreateChildFolder(month,yearId,token);
 }
+// "10 FEB 2027" style label for naming the uploaded file after its due date.
+function driveFileDateLabel(iso){const d=parseISO(iso);return d.getDate()+' '+MON[d.getMonth()].toUpperCase()+' '+d.getFullYear();}
 async function driveUploadFile(file,filename,parentId,token){
   const boundary='-------vr1upload'+Date.now();
   const metaPart=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({name:filename,parents:[parentId]})}\r\n`;
@@ -718,12 +720,15 @@ async function handleVR1Upload(e){
       toast('⚠️ '+file.name+' looks like plate '+info.plate+', not '+r.plate+' — uploaded anyway, please check');
     }
     const dueForFolder=(info.passed&&info.renewalDue)?info.renewalDue:(r.puspakomDue||'');
+    // Name the Drive copy "PLATE DD MON YYYY.pdf" so it's identifiable at a
+    // glance; fall back to the original filename if there's no due date yet.
+    const driveName=dueForFolder?`${r.plate} ${driveFileDateLabel(dueForFolder)}.pdf`:file.name;
     try{
       if(statusEl)statusEl.textContent='Uploading '+file.name+' to Drive…';
       const folderId=await getDriveYearMonthFolder(dueForFolder,token);
-      const uploaded=await driveUploadFile(file,file.name,folderId,token);
+      const uploaded=await driveUploadFile(file,driveName,folderId,token);
       r.puspakomReports=r.puspakomReports||[];
-      r.puspakomReports.push({name:file.name,url:uploaded.webViewLink||('https://drive.google.com/file/d/'+uploaded.id+'/view'),uploadedAt:nowStamp()});
+      r.puspakomReports.push({name:driveName,url:uploaded.webViewLink||('https://drive.google.com/file/d/'+uploaded.id+'/view'),uploadedAt:nowStamp()});
     }catch(err){
       toast('❌ Upload failed for '+file.name+': '+((err&&err.message)||'unknown error'));
       continue;
@@ -1025,7 +1030,23 @@ function fltStep(n){if(fltMonth==='all')fltMonth=new Date().getMonth();fltMonth+
 function setBasis(b){fltBasis=b;render()}
 function toggleHold(){showHold=!showHold;showSales=false;render()}
 function toggleSales(){showSales=!showSales;showHold=false;render()}
-function setCoFilter(v){fltCompany=v.trim();render();const el=document.getElementById('coFilterInput');if(el&&document.activeElement!==el){}else if(el){el.focus();el.value=fltCompany;el.setSelectionRange(fltCompany.length,fltCompany.length)}}
+let coFilterTimer=null;
+function setCoFilter(v){fltCompany=v.trim();
+  // Re-rendering on every keystroke rebuilds the whole list and steals focus
+  // from this input — debounce it so typing feels instant.
+  clearTimeout(coFilterTimer);
+  coFilterTimer=setTimeout(()=>{
+    // render() rebuilds the whole view (a fresh <input> node), which drops
+    // focus — capture whether the user was typing here BEFORE render() runs,
+    // then restore focus + cursor position on the new node afterward.
+    const wasFocused=document.activeElement&&document.activeElement.id==='coFilterInput';
+    render();
+    if(wasFocused){
+      const el=document.getElementById('coFilterInput');
+      if(el){el.focus();el.setSelectionRange(fltCompany.length,fltCompany.length)}
+    }
+  },200);
+}
 function clearCoFilter(){fltCompany='';render()}
 function basisDate(r){return fltBasis==='insp'?r.inspectionDate:r.puspakomDue}
 function salesInsuranceFlag(r){if(r.puspakomOnly||r.salesInsuranceHandled||!r.insuranceDue)return null;const d=daysUntil(r.insuranceDue);if(d==null||d<0||d>90)return null;return d}
