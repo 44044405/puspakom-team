@@ -453,11 +453,13 @@ const RUNNER_COLOR={'MR LEE':'#2c4a73','MR LOO':'#6b9b6b','MR RAYMOND':'#a9763f'
 const RUNNER_PHONE={'MR LEE':'0164952918','MR RAYMOND':'0125255375','MR LOO':'60165517686','MR PETER LIM':'60135076133'};
 const RUNNER_MIGRATE={'LEE':'MR LEE','LOO':'MR LOO','RAYMOND':'MR RAYMOND','PETER LIM':'MR PETER LIM'};
 const ITYPES=['BERKALA','BERKALA SEMULA','AWALAN','AWALAN SEMULA','B5','B2','OTHER'];
+const PREFER_SLOTS=['Morning (Before 12pm)','Afternoon (12pm - 4pm)','Evening (4pm - 6pm)'];
 const STATUS={
  READY_TO_CONTACT:{l:'Ready to Contact',c:'--s-rtc'},
  PENDING_CONTACT:{l:'Pending Contact',c:'--s-pc'},
  CONTACTED:{l:'Contacted · Awaiting Confirm',c:'--s-cc'},
  CONFIRMED:{l:'Confirmed · Awaiting Booking',c:'--s-cb'},
+ PENDING_BOOKING:{l:'Pending Booking',c:'--s-pc'},
  BOOKED:{l:'Booked',c:'--s-bk'},
  REMINDER_1:{l:'Reminder · 1st',c:'--s-rs'},
  REMINDER_2:{l:'Reminder · 2nd',c:'--s-pi'},
@@ -469,6 +471,9 @@ const STATUS={
 };
 const STATUS_ORDER=Object.keys(STATUS);
 const STATUS_LABEL_TO_KEY=Object.fromEntries(STATUS_ORDER.map(k=>[STATUS[k].l,k]));
+// Booking Only vehicles only ever move between these two statuses; every
+// other status belongs to the Arrange Runner pipeline.
+function statusKeysFor(r){return r&&r.runner==='BOOKING ONLY'?['PENDING_BOOKING','BOOKED']:STATUS_ORDER.filter(k=>k!=='PENDING_BOOKING')}
 const MSG_LABEL={arrange:'Arrangement',followup:'Follow Up',confirm:'Confirmation',reminder:'Reminder',runner:'To Runner',retest:'Retest',extra:'Extra Charge'};
 const STATUS_MSG={PENDING_CONTACT:['arrange'],CONTACTED:['followup'],CONFIRMED:['confirm'],BOOKED:['confirm'],REMINDER_1:['reminder','runner'],REMINDER_2:['reminder','runner'],FAIL:['retest'],RETEST:['retest']};
 const BUFFER_DAYS=14;
@@ -504,7 +509,7 @@ function calcInspection(due,runner,ex){if(!due)return'';let d=parseISO(due);d.se
 
 const KEY='puspakom_dashboard_v2';
 let DATA=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report',newRecordMode='runner';
-let fltYear=new Date().getFullYear(),fltMonth='all',fltBasis='due',showHold=false,showSales=false,fltCompany='';
+let fltYear=new Date().getFullYear(),fltMonth=new Date().getMonth(),fltBasis='due',showHold=false,showSales=false,fltCompany='';
 let mSortKey=null,mSortDir=1;
 function setMSort(key){if(mSortKey===key){mSortDir=-mSortDir}else{mSortKey=key;mSortDir=1}render()}
 function mSortIcon(key){if(mSortKey!==key)return '<span class="sort-ic">▽</span>';return mSortDir===1?'<span class="sort-ic on">▲</span>':'<span class="sort-ic on">▼</span>'}
@@ -854,7 +859,9 @@ const TITLES={report:['Report','Overview of inspections by period'],master:['Mas
  follow:['Follow Up','Customers not confirmed after 3 days'],hold:['On Hold','Paused vehicles with reason'],
  pay:['Payment','Pay runners after inspection passed'],cal:['Calendar','Inspection schedule · holidays · runner load']};
 
-function switchView(v){CURVIEW=v;document.querySelectorAll('.nav-i').forEach(b=>b.classList.toggle('on',b.dataset.v===v));render()}
+function switchView(v){CURVIEW=v;
+  if(v==='master'){const now=new Date();fltMonth=now.getMonth();fltYear=now.getFullYear();fltCompany='';showHold=false;showSales=false;}
+  document.querySelectorAll('.nav-i').forEach(b=>b.classList.toggle('on',b.dataset.v===v));render()}
 
 function render(){
   document.getElementById('todayTxt').textContent=fmt(toISO(new Date()));
@@ -1036,9 +1043,11 @@ function stopRow(e){e.stopPropagation()}
 
 const PUSPAKOM_BOOKING_URL='https://gicheck.my/';
 function arrangeBooking(){window.open(PUSPAKOM_BOOKING_URL,'_blank','noopener');}
+// Matches the company/vehicle-no search box against company name OR plate.
+function matchCo(r){if(!fltCompany)return true;const q=fltCompany.toLowerCase();
+  return (r.company||'').toLowerCase().includes(q)||(r.plate||'').toLowerCase().includes(q);}
 // Rows currently shown in Master Data (same month/company/basis filter as the view).
 function currentMasterRows(){
-  const matchCo=r=>!fltCompany||(r.company||'').toLowerCase().includes(fltCompany.toLowerCase());
   let rows;
   if(fltCompany){rows=DATA.filter(r=>r.status!=='ON_HOLD'&&matchCo(r));}
   else{rows=DATA.filter(r=>{if(r.status==='ON_HOLD')return false;const dt=basisDate(r);if(!dt)return false;const d=parseISO(dt);if(d.getFullYear()!==fltYear)return false;return fltMonth==='all'||d.getMonth()===fltMonth;});}
@@ -1060,7 +1069,6 @@ function sendMonthListWA(){
   toast('WhatsApp opened — pick a chat to send (full list also copied, paste if needed)');
 }
 function viewMaster(){
-  const matchCo=r=>!fltCompany||(r.company||'').toLowerCase().includes(fltCompany.toLowerCase());
   // Urgent: inspection is 7 days away (or already past) but nobody has contacted
   // the customer yet — flag it red so it's impossible to miss.
   const urgentContact=r=>{if((r.status!=='PENDING_CONTACT'&&r.status!=='READY_TO_CONTACT')||!r.inspectionDate)return false;const d=daysUntil(r.inspectionDate);return d!=null&&d<=7;};
@@ -1077,13 +1085,13 @@ function viewMaster(){
   const tr=r=>`<div class="trow${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
     <div class="cmp"><b>${r.company}</b>${urgentContact(r)?`<small class="urgent-tag">⚠ Due soon, not contacted · contact now</small>`:''}</div>
     <div class="cell"><b>${r.plate}</b></div>
-    <div class="cell"><span class="runner" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;${r.runner}</span></div>
+    <div class="cell"><span class="runner" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;${r.runner==='BOOKING ONLY'?'<b>'+r.runner+'</b>':r.runner}</span></div>
     <div class="cell"><b>RM${(+r.ourCharge||0)}</b></div>
     <div class="cell">${fmt(r.puspakomDue)}</div>
     <div class="cell">${fmt(r.inspectionDate)}</div>
     <div class="stcell" onclick="stopRow(event)">
       <div class="stwrap">
-        <select class="stsel" onclick="stopRow(event)" onchange="setStatusDirect('${r.id}',this.value)">${STATUS_ORDER.map(k=>`<option value="${k}" style="color:#111" ${k===r.status?'selected':''}>${STATUS[k].l}</option>`).join('')}</select>
+        <select class="stsel" onclick="stopRow(event)" onchange="setStatusDirect('${r.id}',this.value)">${statusKeysFor(r).map(k=>`<option value="${k}" style="color:#111" ${k===r.status?'selected':''}>${STATUS[k].l}</option>`).join('')}</select>
         <span class="stdisp" style="color:${r.status==='PASS'?'var(--s-pass-cy)':'var(--navy)'}">${STATUS[r.status]?STATUS[r.status].l:''}</span>
       </div>
       ${STATUS_MSG[r.status]&&STATUS_MSG[r.status].length?`<button class="stcopy" title="Copy WhatsApp message" onclick="copyRowMsg(event,'${r.id}')">📋</button>`:''}</div></div>`;
@@ -1094,7 +1102,7 @@ function viewMaster(){
       <span class="tag">RM<b>${+r.ourCharge||0}</b></span></div>
       <div class="stcell" style="margin-top:9px" onclick="stopRow(event)">
         <div class="stwrap">
-          <select class="stsel" onclick="stopRow(event)" onchange="setStatusDirect('${r.id}',this.value)">${STATUS_ORDER.map(k=>`<option value="${k}" style="color:#111" ${k===r.status?'selected':''}>${STATUS[k].l}</option>`).join('')}</select>
+          <select class="stsel" onclick="stopRow(event)" onchange="setStatusDirect('${r.id}',this.value)">${statusKeysFor(r).map(k=>`<option value="${k}" style="color:#111" ${k===r.status?'selected':''}>${STATUS[k].l}</option>`).join('')}</select>
           <span class="stdisp" style="color:${r.status==='PASS'?'var(--s-pass-cy)':'var(--navy)'}">${STATUS[r.status]?STATUS[r.status].l:''}</span>
         </div>
         ${STATUS_MSG[r.status]&&STATUS_MSG[r.status].length?`<button class="stcopy" title="Copy WhatsApp message" onclick="copyRowMsg(event,'${r.id}')">📋</button>`:''}</div></div></div>`;
@@ -1103,7 +1111,7 @@ function viewMaster(){
     <select id="fY" onchange="setFlt()">${yearOptions()}</select>
     <select id="fM" onchange="setFlt()">${monthOptions()}</select>
     <div class="mnav"><button onclick="fltStep(-1)">‹</button><button onclick="fltStep(1)">›</button></div>
-    <div class="co-filter"><input id="coFilterInput" type="text" placeholder="🔍 Filter by company name…" value="${fltCompany.replace(/"/g,'&quot;')}" oninput="setCoFilter(this.value)">${fltCompany?`<button class="clr" onclick="clearCoFilter()">✕</button>`:''}</div><div class="book-actions"><button class="book-btn" onclick="arrangeBooking()">📅 Arrange Booking</button><button class="wa-list-btn" onclick="sendMonthListWA()">💬 Send WA Message</button></div></div>`;
+    <div class="co-filter"><input id="coFilterInput" type="text" placeholder="🔍 Filter by company or vehicle no…" value="${fltCompany.replace(/"/g,'&quot;')}" oninput="setCoFilter(this.value)">${fltCompany?`<button class="clr" onclick="clearCoFilter()">✕</button>`:''}</div><div class="book-actions"><button class="book-btn" onclick="arrangeBooking()">📅 Arrange Booking</button><button class="wa-list-btn" onclick="sendMonthListWA()">💬 Send WA Message</button></div></div>`;
   const row2=`<div class="filters" style="margin-top:-6px">
     <div class="seg"><button class="${fltBasis==='due'?'on':''}" onclick="setBasis('due')">By Due Date</button><button class="${fltBasis==='insp'?'on':''}" onclick="setBasis('insp')">By Inspection</button></div>
     <button class="holdchip ${showHold?'on':''}" onclick="toggleHold()">⏸ On Hold${holdRows.length?' ('+holdRows.length+')':''}</button>
@@ -1111,7 +1119,7 @@ function viewMaster(){
 
   if(fltCompany){
     const rows=applyMSort(DATA.filter(r=>r.status!=='ON_HOLD'&&matchCo(r)).sort((a,b)=>a.company.localeCompare(b.company)||(a.puspakomDue||'').localeCompare(b.puspakomDue||'')));
-    const note=`<div class="hold-note">🔍 Showing all vehicles for companies matching “<b>${fltCompany}</b>” — across every month, ignoring the date filter above.</div>`;
+    const note=`<div class="hold-note">🔍 Showing all vehicles matching company or vehicle no "<b>${fltCompany}</b>" — across every month, ignoring the date filter above.</div>`;
     if(!rows.length)return row1+row2+note+emptyHTML('🔍','No matches','Try a shorter part of the company name.');
     return row1+row2+note+`<div class="tbl glass">${head}${rows.map(tr).join('')}</div><div class="tbl-cards">${rows.map(card).join('')}</div>`;
   }
@@ -1144,7 +1152,15 @@ function viewMaster(){
   const count=`<span class="fcount">${rows.length} vehicle${rows.length!==1?'s':''} ${fltMonth==='all'?'in '+fltYear:word+' in '+MONFULL[fltMonth]+' '+fltYear}</span>`;
   const r1=row1.replace('</div>',count+'</div>');
   if(!rows.length)return r1+row2+emptyHTML('🚗','No vehicles for this period','Try another month, switch By&nbsp;Due / By&nbsp;Inspection, or add a new record.');
-  return r1+row2+`<div class="tbl glass">${head}${rows.map(tr).join('')}</div><div class="tbl-cards">${rows.map(card).join('')}</div>`;
+  // Booking Only stays pending-booking cars separate, on top; once one is
+  // marked Booked it drops down into the regular monthly list below.
+  const bookingRows=rows.filter(r=>r.runner==='BOOKING ONLY'&&r.status==='PENDING_BOOKING');
+  const monthlyRows=rows.filter(r=>!(r.runner==='BOOKING ONLY'&&r.status==='PENDING_BOOKING'));
+  const bookingSection=bookingRows.length?`<div class="hold-note" style="color:var(--accent)"><b>📋 BOOKING ONLY</b> — pending booking, customer arranges their own inspection</div>
+      <div class="tbl glass">${head}${bookingRows.map(tr).join('')}</div><div class="tbl-cards">${bookingRows.map(card).join('')}</div>`:'';
+  const monthlySection=monthlyRows.length?`${bookingRows.length?'<div class="hold-note" style="margin-top:14px">📅 Monthly List</div>':''}
+      <div class="tbl glass">${head}${monthlyRows.map(tr).join('')}</div><div class="tbl-cards">${monthlyRows.map(card).join('')}</div>`:'';
+  return r1+row2+bookingSection+monthlySection;
 }
 
 function viewPipeline(){
@@ -1261,7 +1277,7 @@ function renderSheet(){
    <div class="sheet-h"><div><h2>${r.plate}</h2><div class="sub">${r.company}</div></div><div class="sheet-h-actions"><button class="hsave" onclick="saveSheet()">💾 Save</button><button class="x" onclick="closeSheet()">✕</button></div></div>
    <div class="sheet-b">
      <div class="sect"><label class="h">Status · auto record date &amp; time</label>
-       ${field('Current status','f_status',r.status?STATUS[r.status].l:'','select',STATUS_ORDER.map(k=>STATUS[k].l))}
+       ${field('Current status','f_status',r.status?STATUS[r.status].l:'','select',statusKeysFor(r).map(k=>STATUS[k].l))}
        ${r.status==='ON_HOLD'?field('On hold reason','f_onHoldReason',r.onHoldReason,'text'):''}
        ${STATUS_MSG[r.status]?`<div class="qmsg"><div class="qmsg-h">Send via WhatsApp — opens the chat with the message ready, you tap send</div>${STATUS_MSG[r.status].map(t=>`<span class="qmsg-pair"><button class="qmsg-b wa" onclick="openWhatsApp('${r.id}','${t}')">💬 ${MSG_LABEL[t]}</button><button class="qmsg-b copyalt" title="Copy text instead of opening WhatsApp" onclick="quickMsg('${r.id}','${t}')">📋</button></span>`).join('')}</div>`:''}
        ${r.history&&r.history.length?`<details class="histwrap"><summary>Status history (${r.history.length})</summary><div class="hist">${r.history.slice().reverse().map(h=>`<div class="row"><span>${STATUS[h.s]?STATUS[h.s].l:h.s}</span><span>${h.t}</span></div>`).join('')}</div></details>`:''}</div>
@@ -1275,7 +1291,8 @@ function renderSheet(){
        <div class="grid2">${field('Vehicle no','f_plate',r.plate)}${field('Puspakom branch','f_puspakomBranch',r.puspakomBranch||'Mak Mandin','select',['Mak Mandin','Batu Maung','Teluk Kumbar'])}</div>
        <div class="grid3">${field('Puspakom due','f_puspakomDue',r.puspakomDue,'date')}${field('Roadtax due','f_roadtaxDue',r.roadtaxDue,'date')}${field('Insurance due','f_insuranceDue',r.insuranceDue,'date')}</div>
        ${(r.runner==='BOOKING ONLY'||r.clientConfirmDate||r.carrierName||r.icNumber)?`<div class="grid2">${field('Date of client confirm','f_clientConfirmDate',r.clientConfirmDate,'date')}${field('IC number','f_icNumber',r.icNumber)}</div>
-       ${field('Name of person carrying vehicle to Puspakom','f_carrierName',r.carrierName)}`:''}</div>
+       ${field('Name of person carrying vehicle to Puspakom','f_carrierName',r.carrierName)}
+       ${field('Prefer slot','f_preferSlot',r.preferSlot||PREFER_SLOTS[0],'select',PREFER_SLOTS)}`:''}</div>
 
      <div class="sect"><label class="h">3 · Arrangement Details</label>
        ${field('Arrangement / inspection date','f_inspectionDate',r.inspectionDate,'date')}
@@ -1337,7 +1354,7 @@ function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=
   r.status=ns;
   const map={f_company:'company',f_plate:'plate',f_puspakomDue:'puspakomDue',f_roadtaxDue:'roadtaxDue',f_insuranceDue:'insuranceDue',f_inspectionDate:'inspectionDate',
     f_clientType:'clientType',f_paymentStatus:'paymentStatus',f_picName:'picName',f_testCardLink:'testCardLink',f_puspakomReportLink:'puspakomReportLink',f_bookingSlipLink:'bookingSlipLink',f_puspakomBranch:'puspakomBranch',f_waGroupName:'waGroupName',
-    f_clientConfirmDate:'clientConfirmDate',f_carrierName:'carrierName',f_icNumber:'icNumber',
+    f_clientConfirmDate:'clientConfirmDate',f_carrierName:'carrierName',f_icNumber:'icNumber',f_preferSlot:'preferSlot',
     f_b2Remark:'b2Remark',f_quotationNo:'quotationNo',f_invoiceNo:'invoiceNo',f_customerContact:'customerContact',f_pickupAddress:'pickupAddress',
     f_remark:'remark',f_additionalReason:'additionalReason',f_failItems:'failItems',f_retestDate:'retestDate',f_onHoldReason:'onHoldReason',f_renewalDue:'renewalDue'};
   for(const k in map){const v=g(k);if(v!==undefined)r[map[k]]=v}
@@ -1416,7 +1433,7 @@ function renderNewArrangeRunner(){
        <div class="grid2">${field('Quotation no','n_quotationNo','')}${field('Our charge (RM)','n_ourCharge','330','number')}</div>
        <div class="auto-note" id="n_preview">The inspection date is auto-calculated. Assign the runner later in Arrangement Details.</div></div>
      <div class="sect"><label class="h">Already arranged? (optional — leave as-is for a brand-new unarranged job)</label>
-       <div class="grid2">${field('Current status','n_status',STATUS.READY_TO_CONTACT.l,'select',STATUS_ORDER.map(k=>STATUS[k].l))}${field('Actual inspection date (if known)','n_actualInspectionDate','','date')}</div>
+       <div class="grid2">${field('Current status','n_status',STATUS.READY_TO_CONTACT.l,'select',statusKeysFor(null).map(k=>STATUS[k].l))}${field('Actual inspection date (if known)','n_actualInspectionDate','','date')}</div>
        <div class="hint">Set these if the case is already booked / confirmed / passed etc. — this skips the auto-calculated suggestion and records exactly what you enter.</div></div>
      <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
 }
@@ -1429,7 +1446,8 @@ function renderNewBookingOnly(){
        ${field('Date of client confirm','n_clientConfirmDate','','date')}
        ${field('Name of person carrying vehicle to Puspakom','n_carrierName','')}
        <div class="grid2">${field('IC number','n_icNumber','')}${field('Phone number','n_customerContact','')}</div>
-       ${field('Quotation / Invoice number','n_quotationNo','')}</div>
+       ${field('Quotation / Invoice number','n_quotationNo','')}
+       <div class="grid2">${field('WA group name','n_waGroupName','')}${field('Prefer slot','n_preferSlot','Morning (Before 12pm)','select',PREFER_SLOTS)}</div></div>
      <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
 }
 function previewNew(){const due=document.getElementById('n_puspakomDue').value,p=document.getElementById('n_preview');
@@ -1437,7 +1455,7 @@ function previewNew(){const due=document.getElementById('n_puspakomDue').value,p
 function addNew(){const g=id=>{const e=document.getElementById(id);return e?e.value:''};
   const bk=newRecordMode==='booking';
   if(!g('n_plate').trim()||!g('n_puspakomDue')){toast('Please enter at least vehicle no and Puspakom due');return}
-  const statusKey=bk?'READY_TO_CONTACT':(STATUS_LABEL_TO_KEY[g('n_status')]||'READY_TO_CONTACT');
+  const statusKey=bk?'PENDING_BOOKING':(STATUS_LABEL_TO_KEY[g('n_status')]||'READY_TO_CONTACT');
   const actualDate=g('n_actualInspectionDate');
   const r={id:uid(),company:g('n_company').trim()||'(no company)',plate:g('n_plate').trim().toUpperCase(),puspakomDue:g('n_puspakomDue'),
     roadtaxDue:g('n_roadtaxDue'),insuranceDue:g('n_insuranceDue'),clientType:g('n_clientType')||'Corporate',puspakomOnly:false,paymentStatus:'Not set',picName:'',
@@ -1445,7 +1463,7 @@ function addNew(){const g=id=>{const e=document.getElementById(id);return e?e.va
     quotationNo:g('n_quotationNo').trim(),invoiceNo:'',ourCharge:+g('n_ourCharge')||330,runnerCharge:0,testCardFee:0,additionalAmount:0,
     additionalReason:'',renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,
     manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:g('n_customerContact').trim(),pickupAddress:'',
-    clientConfirmDate:g('n_clientConfirmDate'),carrierName:g('n_carrierName').trim(),icNumber:g('n_icNumber').trim(),
+    clientConfirmDate:g('n_clientConfirmDate'),carrierName:g('n_carrierName').trim(),icNumber:g('n_icNumber').trim(),preferSlot:g('n_preferSlot'),
     remark:'',status:statusKey,contactedDate:(statusKey!=='PENDING_CONTACT'&&statusKey!=='READY_TO_CONTACT')?toISO(new Date()):'',renewalCreated:false,nextId:'',prevId:'',demo:false,isNew:true,history:[{s:statusKey,t:nowStamp()}]};
   r.inspectionDate=actualDate||calcInspection(r.puspakomDue,r.runner,r.id);
   fillCompanyFieldsFromExisting(r);DATA.push(r);save();closeSheet();switchView('master');toast('Added '+r.plate)}
