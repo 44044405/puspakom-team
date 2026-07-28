@@ -403,13 +403,14 @@ input[type=file]{display:none}
     <div class="nav-i" data-v="pipe" onclick="switchView('pipe')"><span class="ic">▥</span> Pipeline <span class="badge" id="fuBadge" style="display:none"></span></div>
     <div class="nav-i" data-v="pay" onclick="switchView('pay')"><span class="ic">💲</span> Payment <span class="badge" id="payBadge" style="display:none"></span></div>
     <div class="nav-i" data-v="cal" onclick="switchView('cal')"><span class="ic">▤</span> Calendar</div>
+    <div class="nav-i" data-v="trash" id="navTrash" onclick="switchView('trash')" style="display:none"><span class="ic">🗑️</span> Trash</div>
     <button class="sb-new" onclick="openNew('runner')">＋ New Record</button>
     <div class="sb-foot">
       <button onclick="exportData()">⬇︎ Backup</button>
-      <button onclick="document.getElementById('imp').click()">⬆︎ Restore</button>
+      <button id="restoreBtn" onclick="document.getElementById('imp').click()">⬆︎ Restore</button>
       <input type="file" id="imp" accept=".json" onchange="importData(event)">
       <button onclick="connectDrive()" title="Connect your Google account so uploaded VR1 reports sync to Drive">🔗 Connect Drive</button>
-      <button onclick="selectVR1Folder()" title="Pick your existing Puspakom VR1 Report folder — one time only">📁 Select VR1 Folder</button>
+      <button id="selectFolderBtn" onclick="selectVR1Folder()" title="Pick your existing Puspakom VR1 Report folder — one time only">📁 Select VR1 Folder</button>
       <div class="hint" id="driveStatus" style="text-align:center">⚪ Drive not connected</div>
       <div class="whoami" id="whoAmI" onclick="askName()" title="Click to set your name">Set your name</div>
     </div>
@@ -454,6 +455,18 @@ const RUNNER_PHONE={'MR LEE':'0164952918','MR RAYMOND':'0125255375','MR LOO':'60
 const RUNNER_MIGRATE={'LEE':'MR LEE','LOO':'MR LOO','RAYMOND':'MR RAYMOND','PETER LIM':'MR PETER LIM'};
 const ITYPES=['BERKALA','BERKALA SEMULA','AWALAN','AWALAN SEMULA','B5','B2','OTHER'];
 const PREFER_SLOTS=['Morning (Before 12pm)','Afternoon (12pm - 4pm)','Evening (4pm - 6pm)'];
+// Admin vs Staff — admins can delete records, restore from a backup file,
+// and change which Drive folder uploads go to; everyone else can add/edit
+// but not touch those. Add more emails here as needed.
+const ADMIN_EMAILS=['info@chinhockagency.com'];
+let CURRENT_USER_EMAIL='';
+function isAdmin(){return ADMIN_EMAILS.map(e=>e.toLowerCase()).includes((CURRENT_USER_EMAIL||'').toLowerCase())}
+function applyRolePermissions(){
+  const admin=isAdmin();
+  const trashNav=document.getElementById('navTrash');if(trashNav)trashNav.style.display=admin?'':'none';
+  const restoreBtn=document.getElementById('restoreBtn');if(restoreBtn)restoreBtn.style.display=admin?'':'none';
+  const folderBtn=document.getElementById('selectFolderBtn');if(folderBtn)folderBtn.style.display=admin?'':'none';
+}
 const STATUS={
  READY_TO_CONTACT:{l:'Ready to Contact',c:'--s-rtc'},
  PENDING_CONTACT:{l:'Pending Contact',c:'--s-pc'},
@@ -508,7 +521,7 @@ function calcInspection(due,runner,ex){if(!due)return'';let d=parseISO(due);d.se
   for(let i=0;i<160;i++){const iso=toISO(d);if(!isWE(d)&&!isHol(iso)&&hasCapacity(runner,iso,ex))return iso;d.setDate(d.getDate()-1);}return toISO(d)}
 
 const KEY='puspakom_dashboard_v2';
-let DATA=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report',newRecordMode='runner';
+let DATA=[],TRASH=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report',newRecordMode='runner';
 let fltYear=new Date().getFullYear(),fltMonth=new Date().getMonth(),fltBasis='due',showHold=false,showSales=false,fltCompany='';
 let mSortKey=null,mSortDir=1;
 function setMSort(key){if(mSortKey===key){mSortDir=-mSortDir}else{mSortKey=key;mSortDir=1}render()}
@@ -594,6 +607,7 @@ function connectDrive(){
   driveTokenClient.requestAccessToken({prompt:driveAccessToken?'':'consent'});
 }
 function selectVR1Folder(){
+  if(!isAdmin()){toast('Only admin can change the shared VR1 upload folder');return}
   if(!pickerReady()){toast('Folder picker isn\'t configured yet — see setup notes at the top of the script');return}
   if(!(driveAccessToken&&Date.now()<driveTokenExpiry)){toast('Click "Connect Drive" first');return}
   if(!pickerLoaded){initPicker();toast('Loading folder picker — try again in a moment');return}
@@ -762,11 +776,18 @@ window.addEventListener('load',()=>{
   setTimeout(()=>{initDriveAuth();initPicker();attemptSilentDriveReconnect();},300);
 });
 function migrate(){DATA.forEach(r=>{if(r.status==='REMINDER_SENT')r.status='REMINDER_1';if(RUNNER_MIGRATE[r.runner])r.runner=RUNNER_MIGRATE[r.runner]});}
+// The Supabase `data` column used to store the records array directly; it now
+// stores {records, trash}. Accept both shapes so old saved data still loads.
+function unwrapPayload(payload){
+  if(Array.isArray(payload))return{records:payload,trash:[]};
+  return{records:Array.isArray(payload&&payload.records)?payload.records:[],trash:Array.isArray(payload&&payload.trash)?payload.trash:[]};
+}
 
 async function loadFromServer(){
   const {data,error}=await sb.from('app_state').select('rev,data').eq('id',1).single();
   if(error)throw error;
-  DATA=Array.isArray(data.data)?data.data:[];
+  const unwrapped=unwrapPayload(data.data);
+  DATA=unwrapped.records;TRASH=unwrapped.trash;
   currentRev=data.rev||0;
   migrate();
 }
@@ -777,13 +798,13 @@ async function pushNow(){
   try{
     const nextRev=currentRev+1;
     const {data,error}=await sb.from('app_state')
-      .update({data:DATA,rev:nextRev,updated_at:new Date().toISOString(),updated_by:(typeof myName==='function'&&myName())||'Unknown'})
+      .update({data:{records:DATA,trash:TRASH},rev:nextRev,updated_at:new Date().toISOString(),updated_by:(typeof myName==='function'&&myName())||'Unknown'})
       .eq('id',1).eq('rev',currentRev).select('rev,data');
     if(error){if(/JWT|auth|permission|token/i.test(error.message||''))showLogin('Login expired — please log in again');return;}
     if(!data||!data.length){
       // conflict: someone else already saved (rev moved) — reload their version
       const cur=await sb.from('app_state').select('rev,data').eq('id',1).single();
-      if(cur.data){DATA=Array.isArray(cur.data.data)?cur.data.data:[];currentRev=cur.data.rev||0;migrate();render();toast('⚠️ Data was updated by someone else — latest version loaded, please recheck your recent changes');}
+      if(cur.data){const unwrapped=unwrapPayload(cur.data.data);DATA=unwrapped.records;TRASH=unwrapped.trash;currentRev=cur.data.rev||0;migrate();render();toast('⚠️ Data was updated by someone else — latest version loaded, please recheck your recent changes');}
       return;
     }
     currentRev=data[0].rev;
@@ -797,7 +818,7 @@ function startPolling(){
     try{
       const {data,error}=await sb.from('app_state').select('rev,data').eq('id',1).single();
       if(error||!data)return;
-      if((data.rev||0)!==currentRev){DATA=Array.isArray(data.data)?data.data:[];currentRev=data.rev||0;migrate();render();}
+      if((data.rev||0)!==currentRev){const unwrapped=unwrapPayload(data.data);DATA=unwrapped.records;TRASH=unwrapped.trash;currentRev=data.rev||0;migrate();render();}
     }catch(e){}
   },7000);
 }
@@ -820,12 +841,13 @@ async function boot(){
   try{
     const {data:{session}}=await sb.auth.getSession();
     if(!session){showLogin('Please log in');return;}
+    CURRENT_USER_EMAIL=(session.user&&session.user.email)||'';
     await loadFromServer();
     let seeded=false;
     if(!DATA.length){DATA=seed();seeded=true;}
     applyAutoReminders();
     if(seeded)save();
-    render();renderWhoAmI();startPolling();
+    render();renderWhoAmI();startPolling();applyRolePermissions();
   }catch(e){showLogin('Could not load data: '+((e&&e.message)||'Please try again later'));}
 }
 function uid(){return 'r'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)}
@@ -878,7 +900,8 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 const TITLES={report:['Report','Overview of inspections by period'],master:['Master Data','All vehicles · filter by year & month'],
  pipe:['Pipeline','Your action board · tap a card to open'],
  follow:['Follow Up','Customers not confirmed after 3 days'],hold:['On Hold','Paused vehicles with reason'],
- pay:['Payment','Pay runners after inspection passed'],cal:['Calendar','Inspection schedule · holidays · runner load']};
+ pay:['Payment','Pay runners after inspection passed'],cal:['Calendar','Inspection schedule · holidays · runner load'],
+ trash:['Trash','Deleted records — restore or remove permanently']};
 
 function switchView(v){CURVIEW=v;
   if(v==='master'){const now=new Date();fltMonth=now.getMonth();fltYear=now.getFullYear();fltCompany='';showHold=false;showSales=false;}
@@ -894,7 +917,7 @@ function render(){
   renderMonthBanner();
   renderBackupBanner();
   const v=document.getElementById('view');
-  v.innerHTML=({report:viewReport,master:viewMaster,pipe:viewPipeline,follow:viewFollow,hold:viewHold,pay:viewPay,cal:viewCal})[CURVIEW]();
+  v.innerHTML=({report:viewReport,master:viewMaster,pipe:viewPipeline,follow:viewFollow,hold:viewHold,pay:viewPay,cal:viewCal,trash:viewTrash})[CURVIEW]();
 }
 function setBadge(id,n){const e=document.getElementById(id);e.style.display=n?'inline-block':'none';e.textContent=n}
 function renderDemoBanner(){const has=DATA.some(r=>r.demo);
@@ -1382,7 +1405,7 @@ function renderSheet(){
            :`<button class="bigbtn green" onclick="confirmPass()">Confirm done · add to Payment + create next cycle</button>`}`:''}</div>
 
 
-     <button class="bigbtn danger" onclick="delRecord('${r.id}')">Delete this record</button>
+     ${isAdmin()?`<button class="bigbtn danger" onclick="delRecord('${r.id}')">Delete this record</button>`:''}
    </div>`;
 }
 function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=document.getElementById(id);return e?e.value:undefined};
@@ -1444,7 +1467,38 @@ function confirmPass(){const r=readSheet();r.manualChecked=true;if(!r.renewalDue
 function makeNext(e){e.preventDefault();const r=readSheet();if(!r.renewalDue)r.renewalDue=computeRenewal(r);r.nextId=createNextCycle(r);r.renewalCreated=true;save();renderSheet();render();toast('Next cycle created')}
 function removeNext(e,pid){e.preventDefault();const r=get(pid);if(r&&r.nextId){DATA=DATA.filter(x=>x.id!==r.nextId);r.nextId='';r.renewalCreated=false;save();renderSheet();render();toast('Next cycle removed')}}
 function openNext(e,id){e.preventDefault();openDetail(id)}
-function delRecord(id){if(!confirm('Delete this record?'))return;DATA=DATA.filter(r=>r.id!==id);save();closeSheet();render();toast('Deleted')}
+function delRecord(id){
+  if(!isAdmin()){toast('Only admin can delete records');return}
+  if(!confirm('Delete this record? (can be restored from Trash later)'))return;
+  const r=get(id);if(!r)return;
+  r.deletedAt=nowStamp();r.deletedBy=myName()||CURRENT_USER_EMAIL||'Unknown';
+  DATA=DATA.filter(x=>x.id!==id);
+  TRASH.push(r);
+  save();closeSheet();render();toast('Moved to Trash')
+}
+function restoreFromTrash(id){
+  if(!isAdmin())return;
+  const idx=TRASH.findIndex(r=>r.id===id);if(idx<0)return;
+  const [r]=TRASH.splice(idx,1);delete r.deletedAt;delete r.deletedBy;
+  DATA.push(r);save();render();toast('Restored '+r.plate)
+}
+function permanentlyDelete(id){
+  if(!isAdmin())return;
+  if(!confirm('Permanently delete this record? This cannot be undone.'))return;
+  TRASH=TRASH.filter(r=>r.id!==id);save();render();toast('Permanently deleted')
+}
+function viewTrash(){
+  if(!isAdmin())return emptyHTML('🔒','Admins only','Only the admin account can view and restore deleted records.');
+  if(!TRASH.length)return emptyHTML('🗑️','Trash is empty','Deleted vehicle records appear here and can be restored.');
+  const rows=[...TRASH].sort((a,b)=>(b.deletedAt||'').localeCompare(a.deletedAt||''));
+  return `<div class="hold-note">🗑️ Deleted records — restore if this was a mistake, or remove permanently.</div>
+    <div class="list">${rows.map(r=>`<div class="card glass"><div class="cmain" style="grid-column:1/2"><h3>${r.plate}</h3><div class="co">${r.company}</div>
+      <div class="cmeta"><span class="tag">Deleted ${r.deletedAt||''}${r.deletedBy?' by '+r.deletedBy:''}</span></div>
+      <div class="cmeta" style="margin-top:9px">
+        <button class="mini go" onclick="restoreFromTrash('${r.id}')">↺ Restore</button>
+        <button class="mini undo" style="color:var(--s-fail)" onclick="permanentlyDelete('${r.id}')">✕ Delete permanently</button>
+      </div></div></div>`).join('')}</div>`;
+}
 document.addEventListener('change',e=>{if(!e.target)return;
   if(e.target.id==='f_status'){readSheet();save();renderSheet();render()}
   else if(e.target.id==='f_inspectionType'){readSheet();save();renderSheet()}
@@ -1567,12 +1621,14 @@ function clearDemo(){if(!confirm('Clear all demo data?'))return;DATA=DATA.filter
 function exportData(){
   if(!myName())askName();
   bumpMeta();
-  const payload={__meta:getMeta(),records:DATA};
+  const payload={__meta:getMeta(),records:DATA,trash:TRASH};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);a.download='puspakom_backup_'+toISO(new Date())+'.json';a.click();
   localStorage.setItem(BACKUP_LAST_KEY,toISO(new Date()));localStorage.removeItem(BACKUP_DISMISS_KEY);renderBackupBanner();
   toast('Backup exported'+(myName()?' as '+myName():''))}
-function importData(e){const f=e.target.files[0];if(!f)return;const rd=new FileReader();
+function importData(e){
+  if(!isAdmin()){toast('Only admin can restore from a backup file');e.target.value='';return}
+  const f=e.target.files[0];if(!f)return;const rd=new FileReader();
   rd.onload=()=>{try{
     const d=JSON.parse(rd.result);
     let records,meta;
@@ -1590,6 +1646,7 @@ function importData(e){const f=e.target.files[0];if(!f)return;const rd=new FileR
       if(!ok){toast('Import cancelled');return}
     }
     DATA=records;
+    if(d&&Array.isArray(d.trash))TRASH=d.trash;
     if(meta)localStorage.setItem(META_KEY,JSON.stringify(meta));else bumpMeta();
     save();render();toast('Imported '+records.length+' records')
   }catch(err){toast('Read failed')}};
