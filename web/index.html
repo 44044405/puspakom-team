@@ -526,11 +526,14 @@ const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
 let currentRev=0,dirtyPending=false,savingInFlight=false,pollTimer=null;
 
 // ---- Google Drive integration (VR1 report auto-upload) -----------------
-// Uses the narrow "drive.file" permission (the app can only touch files/
-// folders it created OR that the user explicitly picked via the folder
-// picker below — never anything else in the Drive). Because your VR1
-// folder already existed, everyone needs to pick it once via the picker;
-// that one click is what grants this app access to that specific folder.
+// Uses the regular "drive" (full Drive access) permission. We tried the
+// narrower "drive.file" + folder-picker combo first, but it turned out
+// drive.file only ever grants access to files/folders the app itself
+// created — even a folder the user explicitly picked still 403s on any
+// create/list call, so it can't write into a pre-existing folder like
+// "Puspakom VR1 Report" at all. Full "drive" scope is the only way to
+// write into that existing folder. The folder picker below is now just a
+// convenient folder-selection UI, not a permission grant step.
 //
 // ONE-TIME SETUP NEEDED before this feature works — ask whoever manages the
 // company Google account to do this once:
@@ -552,7 +555,7 @@ let currentRev=0,dirtyPending=false,savingInFlight=false,pollTimer=null;
 //   6. Paste both values below, replacing the two PASTE_… placeholders.
 const DRIVE_CLIENT_ID='959507503596-dde4o0pmbt1ndvbnsprcn2bqn9fgjeib.apps.googleusercontent.com';
 const DRIVE_API_KEY='AIzaSyAKeaxHaJQUcGUtguScMS1Zq6AUwX3_CWY';
-const DRIVE_SCOPE='https://www.googleapis.com/auth/drive.file';
+const DRIVE_SCOPE='https://www.googleapis.com/auth/drive';
 const VR1_FOLDER_KEY='vr1FolderId',VR1_FOLDER_NAME_KEY='vr1FolderName';
 let driveTokenClient=null,driveAccessToken=null,driveTokenExpiry=0,pickerLoaded=false;
 function driveReady(){return !!DRIVE_CLIENT_ID&&!DRIVE_CLIENT_ID.startsWith('PASTE_')}
@@ -617,16 +620,23 @@ function ensureDriveToken(){
     driveTokenClient.requestAccessToken({prompt:driveAccessToken?'':'consent'});
   });
 }
-// drive.file scope only grants create/write access to a picker-selected
-// folder — it does NOT allow files.list/search queries against it (that
-// needs a broader scope). So instead of searching for an existing
-// year/month folder before creating it, we create it once and remember its
-// ID locally (per browser) so we never need to search for it again.
+// Cache found/created year+month folder IDs locally so a repeat upload for
+// the same month skips the network round-trip — but unlike the earlier
+// drive.file attempt, we can now also genuinely look up an existing folder
+// (full "drive" scope allows files.list), so different browsers/devices
+// converge on the same folder instead of each creating their own.
 function driveFolderCacheKey(name,parentId){return 'vr1folder_'+parentId+'_'+name}
 async function driveGetOrCreateChildFolder(name,parentId,token){
   const cacheKey=driveFolderCacheKey(name,parentId);
   const cached=localStorage.getItem(cacheKey);
   if(cached)return cached;
+  const safe=name.replace(/'/g,"\\'");
+  const q=encodeURIComponent(`name='${safe}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const res=await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`,{headers:{Authorization:'Bearer '+token}});
+  if(res.ok){
+    const data=await res.json();
+    if(data.files&&data.files.length){localStorage.setItem(cacheKey,data.files[0].id);return data.files[0].id;}
+  }
   const createRes=await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',
     headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},
     body:JSON.stringify({name,mimeType:'application/vnd.google-apps.folder',parents:[parentId]})});
