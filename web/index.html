@@ -298,7 +298,7 @@ body{
 .remark-popover textarea{width:100%;min-height:90px;font:inherit;font-size:13.5px;border:1px solid var(--line);border-radius:12px;padding:10px;resize:vertical}
 .remark-popover .rp-actions{display:flex;gap:8px;margin-top:12px}
 .remark-popover .rp-actions button{flex:1}
-.plate-remark{color:#7a1f2b;font-weight:800}
+.plate-remark{color:#7a1f2b!important;font-weight:800!important}
 .sheet{position:fixed;top:0;right:0;height:100%;width:min(560px,100%);z-index:50;
   background:rgba(247,250,253,.93);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);
   border-left:1px solid rgba(255,255,255,.7);box-shadow:-20px 0 60px rgba(22,39,63,.22);
@@ -398,7 +398,8 @@ input[type=file]{display:none}
     <img class="lc-logo-img" src="chinhock-logo.jpg" alt="Chin Hock Agency">
     <h2>Puspakom Dashboard</h2>
     <p>CHIN HOCK AGENCY (M) SDN BHD</p>
-    <input id="loginEmail" type="email" placeholder="Team email" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()" autocomplete="username">
+    <input id="loginEmail" type="email" placeholder="Team email" onkeydown="if(event.key==='Enter')document.getElementById('loginName').focus()" autocomplete="username">
+    <input id="loginName" type="text" placeholder="Your name (shown on everything you do)" onkeydown="if(event.key==='Enter')document.getElementById('loginPass').focus()" autocomplete="name">
     <input id="loginPass" type="password" placeholder="Password" onkeydown="if(event.key==='Enter')submitLogin()" autocomplete="current-password">
     <button id="loginBtn" onclick="submitLogin()">Log In</button>
     <div id="loginMsg"></div>
@@ -840,17 +841,19 @@ function startPolling(){
 }
 function showLogin(msg){const el=document.getElementById('loginOverlay');if(el){el.style.display='flex';const m=document.getElementById('loginMsg');if(m&&msg)m.textContent=msg;
   const em=document.getElementById('loginEmail');if(em&&!em.value)em.value=localStorage.getItem('pk_email')||'';
+  const nm=document.getElementById('loginName');if(nm&&!nm.value)nm.value=localStorage.getItem(NAME_KEY)||'';
   const focusEl=(em&&!em.value)?em:document.getElementById('loginPass');if(focusEl)setTimeout(()=>focusEl.focus(),50);}}
 function hideLogin(){const el=document.getElementById('loginOverlay');if(el)el.style.display='none';}
 async function submitLogin(){
   const email=(((document.getElementById('loginEmail')||{}).value)||'').trim();
+  const name=(((document.getElementById('loginName')||{}).value)||'').trim();
   const pass=((document.getElementById('loginPass')||{}).value)||'';
-  if(!email||!pass){showLogin('Please enter email and password');return;}
+  if(!email||!name||!pass){showLogin('Please enter email, your name, and password');return;}
   const btn=document.getElementById('loginBtn');if(btn){btn.disabled=true;btn.textContent='Logging in…';}
   const {error}=await sb.auth.signInWithPassword({email,password:pass});
   if(btn){btn.disabled=false;btn.textContent='Log In';}
   if(error){showLogin('Login failed: '+(error.message||'Please check your email and password'));return;}
-  localStorage.setItem('pk_email',email);hideLogin();boot();
+  localStorage.setItem('pk_email',email);localStorage.setItem(NAME_KEY,name);renderWhoAmI();hideLogin();boot();
 }
 async function logout(){try{await sb.auth.signOut();}catch(e){}if(pollTimer)clearInterval(pollTimer);showLogin('Logged out');}
 async function boot(){
