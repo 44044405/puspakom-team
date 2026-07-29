@@ -413,7 +413,6 @@ input[type=file]{display:none}
     <div class="nav-i" data-v="pipe" onclick="switchView('pipe')"><span class="ic">▥</span> Pipeline <span class="badge" id="fuBadge" style="display:none"></span></div>
     <div class="nav-i" data-v="pay" onclick="switchView('pay')"><span class="ic">💲</span> Payment <span class="badge" id="payBadge" style="display:none"></span></div>
     <div class="nav-i" data-v="cal" onclick="switchView('cal')"><span class="ic">▤</span> Calendar</div>
-    <div class="nav-i" data-v="trash" id="navTrash" onclick="switchView('trash')" style="display:none"><span class="ic">🗑️</span> Trash</div>
     <div class="nav-i" data-v="settings" id="navSettings" onclick="switchView('settings')"><span class="ic">⚙️</span> Settings</div>
     <button class="sb-new" onclick="openNew('runner')">＋ New Record</button>
     <div class="sb-foot">
@@ -471,9 +470,8 @@ let CURRENT_USER_EMAIL='';
 function isAdmin(){return ADMIN_EMAILS.map(e=>e.toLowerCase()).includes((CURRENT_USER_EMAIL||'').toLowerCase())}
 function applyRolePermissions(){
   // Settings itself is open to everyone now (the Tools tab is general-use —
-  // Backup/Connect Drive — only Activity Log/Manage Users inside it stay
-  // admin-only). Trash stays hidden from the nav entirely for non-admins.
-  const trashNav=document.getElementById('navTrash');if(trashNav)trashNav.style.display=isAdmin()?'':'none';
+  // Backup/Connect Drive — Activity Log/Manage Users/Trash tabs inside it
+  // stay admin-only, gated by viewSettings() itself).
 }
 const STATUS={
  READY_TO_CONTACT:{l:'Ready to Contact',c:'--s-rtc'},
@@ -529,7 +527,7 @@ function calcInspection(due,runner,ex){if(!due)return'';let d=parseISO(due);d.se
   for(let i=0;i<160;i++){const iso=toISO(d);if(!isWE(d)&&!isHol(iso)&&hasCapacity(runner,iso,ex))return iso;d.setDate(d.getDate()-1);}return toISO(d)}
 
 const KEY='puspakom_dashboard_v2';
-let DATA=[],TRASH=[],ACTIVITY=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report',newRecordMode='runner';
+let DATA=[],TRASH=[],ACTIVITY=[],TEAM_NAMES=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report',newRecordMode='runner';
 let fltYear=new Date().getFullYear(),fltMonth=new Date().getMonth(),fltBasis='due',showHold=false,showSales=false,fltCompany='';
 let mSortKey=null,mSortDir=1;
 function setMSort(key){if(mSortKey===key){mSortDir=-mSortDir}else{mSortKey=key;mSortDir=1}render()}
@@ -788,10 +786,11 @@ function migrate(){DATA.forEach(r=>{if(r.status==='REMINDER_SENT')r.status='REMI
 // The Supabase `data` column used to store the records array directly; it now
 // stores {records, trash}. Accept both shapes so old saved data still loads.
 function unwrapPayload(payload){
-  if(Array.isArray(payload))return{records:payload,trash:[],activity:[]};
+  if(Array.isArray(payload))return{records:payload,trash:[],activity:[],teamNames:[]};
   return{records:Array.isArray(payload&&payload.records)?payload.records:[],
     trash:Array.isArray(payload&&payload.trash)?payload.trash:[],
-    activity:Array.isArray(payload&&payload.activity)?payload.activity:[]};
+    activity:Array.isArray(payload&&payload.activity)?payload.activity:[],
+    teamNames:Array.isArray(payload&&payload.teamNames)?payload.teamNames:[]};
 }
 // Global "who did what" log, shown to admins under Settings. Capped so it
 // doesn't grow forever.
@@ -804,7 +803,7 @@ async function loadFromServer(){
   const {data,error}=await sb.from('app_state').select('rev,data').eq('id',1).single();
   if(error)throw error;
   const unwrapped=unwrapPayload(data.data);
-  DATA=unwrapped.records;TRASH=unwrapped.trash;ACTIVITY=unwrapped.activity;
+  DATA=unwrapped.records;TRASH=unwrapped.trash;ACTIVITY=unwrapped.activity;TEAM_NAMES=unwrapped.teamNames;
   currentRev=data.rev||0;
   migrate();
 }
@@ -815,13 +814,13 @@ async function pushNow(){
   try{
     const nextRev=currentRev+1;
     const {data,error}=await sb.from('app_state')
-      .update({data:{records:DATA,trash:TRASH,activity:ACTIVITY},rev:nextRev,updated_at:new Date().toISOString(),updated_by:(typeof myName==='function'&&myName())||'Unknown'})
+      .update({data:{records:DATA,trash:TRASH,activity:ACTIVITY,teamNames:TEAM_NAMES},rev:nextRev,updated_at:new Date().toISOString(),updated_by:(typeof myName==='function'&&myName())||'Unknown'})
       .eq('id',1).eq('rev',currentRev).select('rev,data');
     if(error){if(/JWT|auth|permission|token/i.test(error.message||''))showLogin('Login expired — please log in again');return;}
     if(!data||!data.length){
       // conflict: someone else already saved (rev moved) — reload their version
       const cur=await sb.from('app_state').select('rev,data').eq('id',1).single();
-      if(cur.data){const unwrapped=unwrapPayload(cur.data.data);DATA=unwrapped.records;TRASH=unwrapped.trash;ACTIVITY=unwrapped.activity;currentRev=cur.data.rev||0;migrate();render();toast('⚠️ Data was updated by someone else — latest version loaded, please recheck your recent changes');}
+      if(cur.data){const unwrapped=unwrapPayload(cur.data.data);DATA=unwrapped.records;TRASH=unwrapped.trash;ACTIVITY=unwrapped.activity;TEAM_NAMES=unwrapped.teamNames;currentRev=cur.data.rev||0;migrate();render();toast('⚠️ Data was updated by someone else — latest version loaded, please recheck your recent changes');}
       return;
     }
     currentRev=data[0].rev;
@@ -835,7 +834,7 @@ function startPolling(){
     try{
       const {data,error}=await sb.from('app_state').select('rev,data').eq('id',1).single();
       if(error||!data)return;
-      if((data.rev||0)!==currentRev){const unwrapped=unwrapPayload(data.data);DATA=unwrapped.records;TRASH=unwrapped.trash;ACTIVITY=unwrapped.activity;currentRev=data.rev||0;migrate();render();}
+      if((data.rev||0)!==currentRev){const unwrapped=unwrapPayload(data.data);DATA=unwrapped.records;TRASH=unwrapped.trash;ACTIVITY=unwrapped.activity;TEAM_NAMES=unwrapped.teamNames;currentRev=data.rev||0;migrate();render();}
     }catch(e){}
   },7000);
 }
@@ -862,6 +861,19 @@ async function boot(){
     if(!session){showLogin('Please log in');return;}
     CURRENT_USER_EMAIL=(session.user&&session.user.email)||'';
     await loadFromServer();
+    // Non-admins must have a name the admin has pre-approved (set under
+    // Settings > Manage Users) — this runs on every boot (fresh login AND
+    // resumed sessions on reload) since the name is always in localStorage
+    // by this point. Admin is exempt so they can never lock themselves out.
+    if(!isAdmin()){
+      const nm=(myName()||'').trim().toLowerCase();
+      const known=nm&&TEAM_NAMES.some(n=>n.toLowerCase()===nm);
+      if(!known){
+        await sb.auth.signOut();
+        showLogin('That name isn\'t recognized yet — check the spelling, or ask admin to add it under Settings.');
+        return;
+      }
+    }
     let seeded=false;
     if(!DATA.length){DATA=seed();seeded=true;}
     applyAutoReminders();
@@ -920,7 +932,6 @@ const TITLES={report:['Report','Overview of inspections by period'],master:['Mas
  pipe:['Pipeline','Your action board · tap a card to open'],
  follow:['Follow Up','Customers not confirmed after 3 days'],hold:['On Hold','Paused vehicles with reason'],
  pay:['Payment','Pay runners after inspection passed'],cal:['Calendar','Inspection schedule · holidays · runner load'],
- trash:['Trash','Deleted records — restore or remove permanently'],
  settings:['Settings','Admin tools — activity log & user management']};
 
 function switchView(v){CURVIEW=v;
@@ -937,7 +948,7 @@ function render(){
   renderMonthBanner();
   renderBackupBanner();
   const v=document.getElementById('view');
-  v.innerHTML=({report:viewReport,master:viewMaster,pipe:viewPipeline,follow:viewFollow,hold:viewHold,pay:viewPay,cal:viewCal,trash:viewTrash,settings:viewSettings})[CURVIEW]();
+  v.innerHTML=({report:viewReport,master:viewMaster,pipe:viewPipeline,follow:viewFollow,hold:viewHold,pay:viewPay,cal:viewCal,settings:viewSettings})[CURVIEW]();
 }
 function setBadge(id,n){const e=document.getElementById(id);e.style.display=n?'inline-block':'none';e.textContent=n}
 function renderDemoBanner(){const has=DATA.some(r=>r.demo);
@@ -1561,9 +1572,10 @@ function viewSettings(){
   const tabs=`<div class="seg" style="margin-bottom:14px">
     <button class="${settingsTab==='tools'?'on':''}" onclick="setSettingsTab('tools')">🛠️ Tools</button>
     ${isAdmin()?`<button class="${settingsTab==='activity'?'on':''}" onclick="setSettingsTab('activity')">📜 Activity Log</button>
-    <button class="${settingsTab==='users'?'on':''}" onclick="setSettingsTab('users')">👥 Manage Users</button>`:''}
+    <button class="${settingsTab==='users'?'on':''}" onclick="setSettingsTab('users')">👥 Manage Users</button>
+    <button class="${settingsTab==='trash'?'on':''}" onclick="setSettingsTab('trash')">🗑️ Trash</button>`:''}
   </div>`;
-  const page=settingsTab==='users'?viewManageUsers():settingsTab==='activity'?viewActivityLog():viewSettingsTools();
+  const page=settingsTab==='users'?viewManageUsers():settingsTab==='activity'?viewActivityLog():settingsTab==='trash'?viewTrash():viewSettingsTools();
   return tabs+page;
 }
 function viewSettingsTools(){
@@ -1600,7 +1612,24 @@ function viewManageUsers(){
       <button class="mini import-btn" onclick="window.open('https://supabase.com/dashboard/project/lxjtwkxgxwojtltfdugj/auth/users','_blank')">Open Supabase → Users ↗</button>
       <label class="h" style="margin-top:18px;display:block">Make someone an admin</label>
       <div class="hint" style="margin:6px 0">Admin emails are set in the app's own code, not in Supabase — so a new login can never grant itself admin powers by itself. Ask for that email to be added to the admin list here.</div>
+      <label class="h" style="margin-top:18px;display:block">Approved names</label>
+      <div class="hint" style="margin:6px 0 10px">Non-admin logins must type one of these names exactly (not case-sensitive) to get in — this is what stops a shared login being used under someone else's name.</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <input id="newTeamName" type="text" placeholder="Add a name…" style="flex:1;font:inherit;font-size:13.5px;border:1px solid var(--line);border-radius:10px;padding:9px" onkeydown="if(event.key==='Enter')addTeamName()">
+        <button class="mini" style="background:var(--accent);color:#fff" onclick="addTeamName()">Add</button>
+      </div>
+      <div>${TEAM_NAMES.length?TEAM_NAMES.map(n=>`<span style="display:inline-flex;align-items:center;gap:6px;margin:0 6px 6px 0;padding:6px 10px;background:var(--glass-strong);border-radius:20px;font-size:12.5px">${n}<button onclick="removeTeamName('${n.replace(/'/g,"\\'")}')" style="border:0;background:transparent;cursor:pointer;color:var(--s-fail);font-weight:700">✕</button></span>`).join(''):'<span class="hint">No names added yet — no one but admin can log in until you add some.</span>'}</div>
     </div>`;
+}
+function addTeamName(){
+  const inp=document.getElementById('newTeamName');if(!inp)return;
+  const v=inp.value.trim();if(!v)return;
+  if(TEAM_NAMES.some(n=>n.toLowerCase()===v.toLowerCase())){toast('Already in the list');return}
+  TEAM_NAMES.push(v);save();render();toast('Added '+v);
+}
+function removeTeamName(name){
+  if(!confirm('Remove "'+name+'" from the approved list? They won\'t be able to log in until re-added.'))return;
+  TEAM_NAMES=TEAM_NAMES.filter(n=>n!==name);save();render();toast('Removed');
 }
 document.addEventListener('change',e=>{if(!e.target)return;
   if(e.target.id==='f_status'){readSheet();save();renderSheet();render()}
@@ -1725,7 +1754,7 @@ function clearDemo(){if(!confirm('Clear all demo data?'))return;DATA=DATA.filter
 function exportData(){
   if(!myName())askName();
   bumpMeta();
-  const payload={__meta:getMeta(),records:DATA,trash:TRASH,activity:ACTIVITY};
+  const payload={__meta:getMeta(),records:DATA,trash:TRASH,activity:ACTIVITY,teamNames:TEAM_NAMES};
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);a.download='puspakom_backup_'+toISO(new Date())+'.json';a.click();
   localStorage.setItem(BACKUP_LAST_KEY,toISO(new Date()));localStorage.removeItem(BACKUP_DISMISS_KEY);renderBackupBanner();
@@ -1752,6 +1781,7 @@ function importData(e){
     DATA=records;
     if(d&&Array.isArray(d.trash))TRASH=d.trash;
     if(d&&Array.isArray(d.activity))ACTIVITY=d.activity;
+    if(d&&Array.isArray(d.teamNames))TEAM_NAMES=d.teamNames;
     if(meta)localStorage.setItem(META_KEY,JSON.stringify(meta));else bumpMeta();
     save();render();toast('Imported '+records.length+' records')
   }catch(err){toast('Read failed')}};
