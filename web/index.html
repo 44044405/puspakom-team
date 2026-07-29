@@ -299,6 +299,8 @@ body{
 .remark-popover .rp-actions{display:flex;gap:8px;margin-top:12px}
 .remark-popover .rp-actions button{flex:1}
 .plate-remark{color:#7a1f2b!important;font-weight:800!important}
+.teal-tag{font-size:10.5px;font-weight:800;color:#0a6b6b;letter-spacing:.2px;margin-top:2px}
+.teal-tag.done{color:#5ec9c9}
 .sheet{position:fixed;top:0;right:0;height:100%;width:min(560px,100%);z-index:50;
   background:rgba(247,250,253,.93);backdrop-filter:blur(30px) saturate(180%);-webkit-backdrop-filter:blur(30px) saturate(180%);
   border-left:1px solid rgba(255,255,255,.7);box-shadow:-20px 0 60px rgba(22,39,63,.22);
@@ -1165,6 +1167,10 @@ function viewMaster(){
   // Urgent: inspection is 7 days away (or already past) but nobody has contacted
   // the customer yet — flag it red so it's impossible to miss.
   const urgentContact=r=>{if((r.status!=='PENDING_CONTACT'&&r.status!=='READY_TO_CONTACT')||!r.inspectionDate)return false;const d=daysUntil(r.inspectionDate);return d!=null&&d<=7;};
+  const samanJpjTagsHTML=r=>{let out='';
+    if(r.needsSaman)out+=`<div class="teal-tag${r.samanPaid?' done':''}">BAYAR PUSPAKOM SAMAN</div>`;
+    if(r.needsJpjPermit)out+=`<div class="teal-tag${r.jpjPermitDone?' done':''}">APPLY ONE DAY PERMIT</div>`;
+    return out;};
   const holdRows=DATA.filter(r=>r.status==='ON_HOLD'&&matchCo(r)).sort((a,b)=>(a.puspakomDue||'').localeCompare(b.puspakomDue||''));
   const asr=assistRows().filter(matchCo);
   const head=`<div class="trow head">
@@ -1176,7 +1182,7 @@ function viewMaster(){
     <div class="sortable" onclick="setMSort('inspectionDate')">Inspection ${mSortIcon('inspectionDate')}</div>
     <div class="sortable" onclick="setMSort('status')">Status ${mSortIcon('status')}</div></div>`;
   const tr=r=>`<div class="trow${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
-    <div class="cmp"><b>${r.company}</b>${urgentContact(r)?`<small class="urgent-tag">⚠ Due soon, not contacted · contact now</small>`:''}</div>
+    <div class="cmp"><b>${r.company}</b>${urgentContact(r)?`<small class="urgent-tag">⚠ Due soon, not contacted · contact now</small>`:''}${samanJpjTagsHTML(r)}</div>
     <div class="cell"><b class="${r.remark&&r.remark.trim()?'plate-remark':''}" onclick="event.stopPropagation();openRemarkPopover('${r.id}')" style="cursor:pointer" title="Click to view/add remark">${r.plate}</b></div>
     <div class="cell"><span class="runner" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;${r.runner==='BOOKING ONLY'?'<b>'+r.runner+'</b>':r.runner}</span></div>
     <div class="cell"><b>RM${(+r.ourCharge||0)}</b></div>
@@ -1189,7 +1195,7 @@ function viewMaster(){
       </div>
       ${STATUS_MSG[r.status]&&STATUS_MSG[r.status].length?`<button class="stcopy" title="Copy WhatsApp message" onclick="copyRowMsg(event,'${r.id}')">📋</button>`:''}</div></div>`;
   const card=r=>`<div class="card glass lift${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
-    <div class="cmain" style="grid-column:1/2"><h3 class="${r.remark&&r.remark.trim()?'plate-remark':''}" onclick="event.stopPropagation();openRemarkPopover('${r.id}')" style="cursor:pointer" title="Click to view/add remark">${r.plate}</h3><div class="co">${r.company}</div>${urgentContact(r)?`<div class="urgent-tag">⚠ Due soon, not contacted · contact now</div>`:''}
+    <div class="cmain" style="grid-column:1/2"><h3 class="${r.remark&&r.remark.trim()?'plate-remark':''}" onclick="event.stopPropagation();openRemarkPopover('${r.id}')" style="cursor:pointer" title="Click to view/add remark">${r.plate}</h3><div class="co">${r.company}</div>${samanJpjTagsHTML(r)}${urgentContact(r)?`<div class="urgent-tag">⚠ Due soon, not contacted · contact now</div>`:''}
       <div class="cmeta"><span class="tag">Due <b>${fmt(r.puspakomDue)}</b></span><span class="tag">Insp <b>${fmt(r.inspectionDate)}</b></span>
       <span class="tag" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;<b style="color:${RUNNER_COLOR[r.runner]}">${r.runner}</b></span>
       <span class="tag">RM<b>${+r.ourCharge||0}</b></span></div>
@@ -1415,6 +1421,13 @@ function renderSheet(){
        ${field('Name of person carrying vehicle to Puspakom','f_carrierName',r.carrierName)}
        ${field('Prefer slot','f_preferSlot',r.preferSlot||PREFER_SLOTS[0],'select',PREFER_SLOTS)}`:''}</div>
 
+     <div class="sect"><label class="h">Saman &amp; JPJ Permit</label>
+       <label class="ck ${r.needsSaman?'done':''}" onclick="event.preventDefault();toggleCk('needsSaman')"><input type="checkbox" ${r.needsSaman?'checked':''}> ⚠️ Has outstanding Saman</label>
+       ${r.needsSaman?`<label class="ck ${r.samanPaid?'done':''}" onclick="event.preventDefault();toggleCk('samanPaid')"><input type="checkbox" ${r.samanPaid?'checked':''}> ✓ Saman paid</label>`:''}
+       <label class="ck ${r.needsJpjPermit?'done':''}" onclick="event.preventDefault();toggleCk('needsJpjPermit')"><input type="checkbox" ${r.needsJpjPermit?'checked':''}> 🪪 Needs JPJ One Day Permit</label>
+       ${r.needsJpjPermit?`${field('JPJ permit note','f_jpjPermitNote',r.jpjPermitNote)}
+       <label class="ck ${r.jpjPermitDone?'done':''}" onclick="event.preventDefault();toggleCk('jpjPermitDone')"><input type="checkbox" ${r.jpjPermitDone?'checked':''}> ✓ Permit applied/done</label>`:''}</div>
+
      <div class="sect"><label class="h">3 · Arrangement Details</label>
        ${field('Arrangement / inspection date','f_inspectionDate',r.inspectionDate,'date')}
        ${r.inspectionDate!==insAuto?`<div class="auto-note">Suggested: ${fmt(insAuto)} <a href="#" onclick="useAuto(event)">Apply</a></div>`:`<div class="hint">Auto-set ~${BUFFER_DAYS} days before due (skips weekends, holidays &amp; full runner days). You may inspect up to 30 days before due.</div>`}
@@ -1475,7 +1488,7 @@ function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=
   r.status=ns;
   const map={f_company:'company',f_plate:'plate',f_puspakomDue:'puspakomDue',f_roadtaxDue:'roadtaxDue',f_insuranceDue:'insuranceDue',f_inspectionDate:'inspectionDate',
     f_clientType:'clientType',f_paymentStatus:'paymentStatus',f_picName:'picName',f_testCardLink:'testCardLink',f_puspakomReportLink:'puspakomReportLink',f_bookingSlipLink:'bookingSlipLink',f_puspakomBranch:'puspakomBranch',f_waGroupName:'waGroupName',
-    f_clientConfirmDate:'clientConfirmDate',f_carrierName:'carrierName',f_icNumber:'icNumber',f_preferSlot:'preferSlot',
+    f_clientConfirmDate:'clientConfirmDate',f_carrierName:'carrierName',f_icNumber:'icNumber',f_preferSlot:'preferSlot',f_jpjPermitNote:'jpjPermitNote',
     f_b2Remark:'b2Remark',f_quotationNo:'quotationNo',f_invoiceNo:'invoiceNo',f_customerContact:'customerContact',f_pickupAddress:'pickupAddress',
     f_remark:'remark',f_additionalReason:'additionalReason',f_failItems:'failItems',f_retestDate:'retestDate',f_onHoldReason:'onHoldReason',f_renewalDue:'renewalDue'};
   for(const k in map){const v=g(k);if(v!==undefined)r[map[k]]=v}
@@ -1645,6 +1658,11 @@ function renderNewSheet(){
   document.getElementById('sheetContent').innerHTML = newRecordMode==='booking'?renderNewBookingOnly():renderNewArrangeRunner();
   if(newRecordMode==='runner')document.getElementById('n_puspakomDue').addEventListener('change',previewNew);
 }
+function samanJpjFieldsHTML(){
+  return `<label class="ck"><input type="checkbox" id="n_needsSaman"> ⚠️ Has outstanding Saman (needs to pay before Puspakom)</label>
+    <label class="ck"><input type="checkbox" id="n_needsJpjPermit"> 🪪 Needs JPJ One Day Permit</label>
+    ${field('JPJ permit note (optional — e.g. application date)','n_jpjPermitNote','')}`;
+}
 function renderNewArrangeRunner(){
   return `<div class="sheet-h"><div><h2>New Record</h2><div class="sub">New job passed from sales — to arrange, or already arranged, just record it</div></div><button class="x" onclick="closeSheet()">✕</button></div>
    <div class="sheet-b">${newModeToggle()}<div class="sect"><label class="h">New vehicle</label>
@@ -1654,6 +1672,7 @@ function renderNewArrangeRunner(){
        ${field('Inspection type','n_inspectionType','BERKALA','select',ITYPES)}
        ${field('WA group name · shared company-wide','n_waGroupName','')}
        <div class="grid2">${field('Quotation no','n_quotationNo','')}${field('Our charge (RM)','n_ourCharge','330','number')}</div>
+       ${samanJpjFieldsHTML()}
        <div class="auto-note" id="n_preview">The inspection date is auto-calculated. Assign the runner later in Arrangement Details.</div></div>
      <div class="sect"><label class="h">Already arranged? (optional — leave as-is for a brand-new unarranged job)</label>
        <div class="grid2">${field('Current status','n_status',STATUS.READY_TO_CONTACT.l,'select',statusKeysFor(null).map(k=>STATUS[k].l))}${field('Actual inspection date (if known)','n_actualInspectionDate','','date')}</div>
@@ -1670,7 +1689,8 @@ function renderNewBookingOnly(){
        ${field('Name of person carrying vehicle to Puspakom','n_carrierName','')}
        <div class="grid2">${field('IC number','n_icNumber','')}${field('Phone number','n_customerContact','')}</div>
        ${field('Quotation / Invoice number','n_quotationNo','')}
-       <div class="grid2">${field('WA group name','n_waGroupName','')}${field('Prefer slot','n_preferSlot','Morning (Before 12pm)','select',PREFER_SLOTS)}</div></div>
+       <div class="grid2">${field('WA group name','n_waGroupName','')}${field('Prefer slot','n_preferSlot','Morning (Before 12pm)','select',PREFER_SLOTS)}</div>
+       ${samanJpjFieldsHTML()}</div>
      <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
 }
 function previewNew(){const due=document.getElementById('n_puspakomDue').value,p=document.getElementById('n_preview');
@@ -1684,6 +1704,7 @@ function previewNew(){const due=document.getElementById('n_puspakomDue').value,p
   p.innerHTML=html;
 }
 function addNew(){const g=id=>{const e=document.getElementById(id);return e?e.value:''};
+  const gc=id=>{const e=document.getElementById(id);return e?e.checked:false};
   const bk=newRecordMode==='booking';
   if(!g('n_plate').trim()||!g('n_puspakomDue')){toast('Please enter at least vehicle no and Puspakom due');return}
   const statusKey=bk?'PENDING_BOOKING':(STATUS_LABEL_TO_KEY[g('n_status')]||'READY_TO_CONTACT');
@@ -1695,6 +1716,7 @@ function addNew(){const g=id=>{const e=document.getElementById(id);return e?e.va
     additionalReason:'',renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,
     manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:g('n_customerContact').trim(),pickupAddress:'',
     clientConfirmDate:g('n_clientConfirmDate'),carrierName:g('n_carrierName').trim(),icNumber:g('n_icNumber').trim(),preferSlot:g('n_preferSlot'),
+    needsSaman:gc('n_needsSaman'),samanPaid:false,needsJpjPermit:gc('n_needsJpjPermit'),jpjPermitNote:g('n_jpjPermitNote').trim(),jpjPermitDone:false,
     remark:'',status:statusKey,contactedDate:(statusKey!=='PENDING_CONTACT'&&statusKey!=='READY_TO_CONTACT')?toISO(new Date()):'',renewalCreated:false,nextId:'',prevId:'',demo:false,isNew:true,history:[{s:statusKey,t:nowStamp()}]};
   r.inspectionDate=actualDate||calcInspection(r.puspakomDue,r.runner,r.id);
   fillCompanyFieldsFromExisting(r);DATA.push(r);save();closeSheet();switchView('master');toast('Added '+r.plate);
