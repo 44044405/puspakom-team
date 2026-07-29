@@ -1674,7 +1674,15 @@ function renderNewBookingOnly(){
      <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
 }
 function previewNew(){const due=document.getElementById('n_puspakomDue').value,p=document.getElementById('n_preview');
-  if(due&&p){const iso=calcInspection(due,'MR LEE','_new');p.innerHTML='Suggested inspection date: <b>'+fmt(iso)+'</b> (skips weekends · holidays)'}}
+  if(!due||!p)return;
+  const iso=calcInspection(due,'MR LEE','_new');
+  let html='Suggested inspection date: <b>'+fmt(iso)+'</b> (skips weekends · holidays)';
+  const d=daysUntil(due);
+  if(d!=null&&d<-14){
+    html+=`<div style="margin-top:8px;color:var(--s-fail)">⚠️ This due date already passed. If you're actually arranging the inspection for a later date, fill in <b>"Actual inspection date"</b> below with that real date — then view Master Data with <b>"By Inspection"</b> (instead of "By Due Date") to see it under the right month.</div>`;
+  }
+  p.innerHTML=html;
+}
 function addNew(){const g=id=>{const e=document.getElementById(id);return e?e.value:''};
   const bk=newRecordMode==='booking';
   if(!g('n_plate').trim()||!g('n_puspakomDue')){toast('Please enter at least vehicle no and Puspakom due');return}
