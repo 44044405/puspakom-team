@@ -1346,10 +1346,10 @@ function viewCal(){
   const todayISO=toISO(new Date()),dows=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];let cells='';
   for(let i=0;i<42;i++){const d=new Date(start);d.setDate(start.getDate()+i);const iso=toISO(d);
     const out=d.getMonth()!==calMonth;
-    // Once a vehicle has ever been Booked, keep it on the calendar (through
-    // reminders etc.) until it's actually resolved — Teoh uses this to see
-    // "who has inspection tomorrow" right up to the day it's passed/failed.
-    const evts=DATA.filter(r=>r.inspectionDate===iso&&(r.history||[]).some(h=>h.s==='BOOKED')&&r.status!=='PASS'&&r.status!=='FAIL');
+    // Once a vehicle has ever been Booked, it stays on the calendar
+    // permanently (even after Pass/Fail) — this is Teoh's reference for
+    // "who has/had inspection on this day", not just what's still pending.
+    const evts=DATA.filter(r=>r.inspectionDate===iso&&(r.history||[]).some(h=>h.s==='BOOKED'));
     let cls='dcell';if(out)cls+=' out';if(isWE(d))cls+=' we';if(isHol(iso))cls+=' hol';if(iso===todayISO)cls+=' today';
     cells+=`<div class="${cls}"><div class="dn">${d.getDate()}</div>${isHol(iso)?`<div class="holn">${HOLIDAYS[iso]}</div>`:''}
       ${evts.map(r=>`<div class="evt" style="background:${RUNNER_COLOR[r.runner]||'#6b7686'}" onclick="openDetail('${r.id}')" title="${r.company}">${r.plate}</div>`).join('')}</div>`}
