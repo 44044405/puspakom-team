@@ -226,7 +226,10 @@ body{
 .trow.urgent{background:var(--s-fail-bg);box-shadow:inset 4px 0 0 var(--s-fail)}
 .trow.urgent:hover{background:var(--s-fail-bg)}
 .trow.urgent .cmp b{color:var(--s-fail)}
+.trow.passed{background:var(--s-pass-bg)}
+.trow.passed:hover{background:var(--s-pass-bg)}
 .card.urgent{border-color:var(--s-fail);box-shadow:0 0 0 1px var(--s-fail),0 8px 22px rgba(177,111,98,.18)}
+.card.passed{background:var(--s-pass-bg)}
 .urgent-tag{display:block;margin-top:2px;font-size:10.5px;font-weight:800;color:var(--s-fail);letter-spacing:.2px}
 .pill{font-size:11px;font-weight:600;border-radius:18px;padding:5px 11px;white-space:nowrap;display:inline-block}
 .tbl-cards{display:none}
@@ -1181,7 +1184,7 @@ function viewMaster(){
     <div class="sortable" onclick="setMSort('puspakomDue')">Puspakom Due ${mSortIcon('puspakomDue')}</div>
     <div class="sortable" onclick="setMSort('inspectionDate')">Inspection ${mSortIcon('inspectionDate')}</div>
     <div class="sortable" onclick="setMSort('status')">Status ${mSortIcon('status')}</div></div>`;
-  const tr=r=>`<div class="trow${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
+  const tr=r=>`<div class="trow${urgentContact(r)?' urgent':r.status==='PASS'?' passed':''}" onclick="openDetail('${r.id}')">
     <div class="cmp"><b>${r.company}</b>${urgentContact(r)?`<small class="urgent-tag">⚠ Due soon, not contacted · contact now</small>`:''}${samanJpjTagsHTML(r)}</div>
     <div class="cell"><b class="${r.remark&&r.remark.trim()?'plate-remark':''}" onclick="event.stopPropagation();openRemarkPopover('${r.id}')" style="cursor:pointer" title="Click to view/add remark">${r.plate}</b></div>
     <div class="cell"><span class="runner" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;${r.runner==='BOOKING ONLY'?'<b>'+r.runner+'</b>':r.runner}</span></div>
@@ -1194,7 +1197,7 @@ function viewMaster(){
         <span class="stdisp" style="color:${r.status==='PASS'?'var(--s-pass-cy)':'var(--navy)'}">${STATUS[r.status]?STATUS[r.status].l:''}</span>
       </div>
       ${STATUS_MSG[r.status]&&STATUS_MSG[r.status].length?`<button class="stcopy" title="Copy WhatsApp message" onclick="copyRowMsg(event,'${r.id}')">📋</button>`:''}</div></div>`;
-  const card=r=>`<div class="card glass lift${urgentContact(r)?' urgent':''}" onclick="openDetail('${r.id}')">
+  const card=r=>`<div class="card glass lift${urgentContact(r)?' urgent':r.status==='PASS'?' passed':''}" onclick="openDetail('${r.id}')">
     <div class="cmain" style="grid-column:1/2"><h3 class="${r.remark&&r.remark.trim()?'plate-remark':''}" onclick="event.stopPropagation();openRemarkPopover('${r.id}')" style="cursor:pointer" title="Click to view/add remark">${r.plate}</h3><div class="co">${r.company}</div>${samanJpjTagsHTML(r)}${urgentContact(r)?`<div class="urgent-tag">⚠ Due soon, not contacted · contact now</div>`:''}
       <div class="cmeta"><span class="tag">Due <b>${fmt(r.puspakomDue)}</b></span><span class="tag">Insp <b>${fmt(r.inspectionDate)}</b></span>
       <span class="tag" style="color:${RUNNER_COLOR[r.runner]}">●&nbsp;<b style="color:${RUNNER_COLOR[r.runner]}">${r.runner}</b></span>
