@@ -498,7 +498,7 @@ const STATUS_LABEL_TO_KEY=Object.fromEntries(STATUS_ORDER.map(k=>[STATUS[k].l,k]
 // Booking Only vehicles only ever move between these two statuses; every
 // other status belongs to the Arrange Runner pipeline.
 function statusKeysFor(r){return r&&r.runner==='BOOKING ONLY'?['PENDING_BOOKING','BOOKED']:STATUS_ORDER.filter(k=>k!=='PENDING_BOOKING')}
-const MSG_LABEL={arrange:'Arrangement',followup:'Follow Up',confirm:'Confirmation',reminder:'Reminder',runner:'To Runner',retest:'Retest',extra:'Extra Charge'};
+const MSG_LABEL={arrange:'Arrangement',followup:'Follow Up',confirm:'Confirmation',reminder:'Reminder',runner:'To Runner',retest:'Retest',extra:'Extra Charge',arrangeInspection:'Arrange Inspection'};
 const STATUS_MSG={PENDING_CONTACT:['arrange'],CONTACTED:['followup'],CONFIRMED:['confirm'],BOOKED:['confirm'],REMINDER_1:['reminder','runner'],REMINDER_2:['reminder','runner'],FAIL:['retest'],RETEST:['retest']};
 const BUFFER_DAYS=14;
 const SOON_DAYS=60;
@@ -532,7 +532,7 @@ function calcInspection(due,runner,ex){if(!due)return'';let d=parseISO(due);d.se
   for(let i=0;i<160;i++){const iso=toISO(d);if(!isWE(d)&&!isHol(iso)&&hasCapacity(runner,iso,ex))return iso;d.setDate(d.getDate()-1);}return toISO(d)}
 
 const KEY='puspakom_dashboard_v2';
-let DATA=[],TRASH=[],ACTIVITY=[],TEAM_NAMES=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report',newRecordMode='runner';
+let DATA=[],TRASH=[],ACTIVITY=[],TEAM_NAMES=[],calMonth=new Date().getMonth(),calYear=new Date().getFullYear(),openId=null,CURVIEW='report',newRecordMode='runner',newRecordGeranLink='';
 let fltYear=new Date().getFullYear(),fltMonth=new Date().getMonth(),fltBasis='due',showHold=false,showSales=false,fltCompany='';
 let mSortKey=null,mSortDir=1;
 function setMSort(key){if(mSortKey===key){mSortDir=-mSortDir}else{mSortKey=key;mSortDir=1}render()}
@@ -702,7 +702,7 @@ async function driveUploadFile(file,filename,parentId,token){
   const boundary='-------vr1upload'+Date.now();
   const metaPart=`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({name:filename,parents:[parentId]})}\r\n`;
   const fileBuf=await file.arrayBuffer();
-  const body=new Blob([metaPart,`--${boundary}\r\nContent-Type: application/pdf\r\n\r\n`,fileBuf,`\r\n--${boundary}--`]);
+  const body=new Blob([metaPart,`--${boundary}\r\nContent-Type: ${file.type||'application/octet-stream'}\r\n\r\n`,fileBuf,`\r\n--${boundary}--`]);
   const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',{
     method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':`multipart/related; boundary=${boundary}`},body});
   if(!res.ok)throw new Error('Drive upload failed: '+await driveErrorDetail(res));
@@ -718,6 +718,74 @@ async function extractPdfText(file){
     for(let i=1;i<=doc.numPages;i++){const page=await doc.getPage(i);const content=await page.getTextContent();text+=content.items.map(it=>it.str).join(' ')+'\n';}
     return text;
   }catch(e){return''}
+}
+// ---- Google Drive integration (Arrange Inspection — Geran auto-upload) ----
+// Reuses the same Drive connection as VR1 reports above. Puspakom/Arrange
+// Inspection/B5 and B2 folders were created once by hand; every upload just
+// gets-or-creates a "<plate> <inspection type>" subfolder inside the right one.
+const GERAN_B5_FOLDER_ID='1sitIlU5W4cAxTGzVY6aY5_1NK_Jw2z3-',GERAN_B2_FOLDER_ID='1fkjz4nxAw5IfrM-DxuxR3zN4IO9CcBed';
+async function handleGeranUpload(e){
+  const files=Array.from(e.target.files||[]);e.target.value='';
+  if(!files.length)return;
+  const r=get(openId);if(!r){toast('Open a vehicle record first');return}
+  if(!driveReady()){toast('Google Drive isn\'t set up yet — see setup notes at the top of the script');return}
+  const statusEl=document.getElementById('geranUploadStatus');if(statusEl)statusEl.style.display='block';
+  let token;
+  try{ if(statusEl)statusEl.textContent='Connecting to Google Drive…'; token=await ensureDriveToken(); }
+  catch(err){ toast('Could not connect to Google Drive'); if(statusEl)statusEl.style.display='none'; return }
+  try{
+    const parentId=r.inspectionType==='B2'?GERAN_B2_FOLDER_ID:GERAN_B5_FOLDER_ID;
+    const folderName=`${r.plate} ${r.inspectionType==='B2'?'B2':'B5'}`;
+    if(statusEl)statusEl.textContent='Preparing folder "'+folderName+'"…';
+    const folderId=await driveGetOrCreateChildFolder(folderName,parentId,token);
+    for(const file of files){
+      if(statusEl)statusEl.textContent='Uploading '+file.name+'…';
+      const uploaded=await driveUploadFile(file,file.name,folderId,token);
+      r.geranDriveLink=uploaded.webViewLink||('https://drive.google.com/file/d/'+uploaded.id+'/view');
+    }
+    save();renderSheet();render();
+    toast('✅ Geran uploaded to Drive');
+  }catch(err){
+    toast('❌ Geran upload failed: '+((err&&err.message)||'unknown error'));
+  }
+  if(statusEl)statusEl.style.display='none';
+}
+// Same as handleGeranUpload above, but for the New Record form — before a
+// record even exists yet, so it reads plate/type straight from the form
+// fields and stashes the link in newRecordGeranLink for addNew() to pick up.
+// Updates the DOM directly (no renderNewSheet() re-render) so the rest of
+// the in-progress form isn't wiped.
+async function handleNewGeranUpload(e){
+  const files=Array.from(e.target.files||[]);e.target.value='';
+  if(!files.length)return;
+  const plate=(document.getElementById('n_plate').value||'').trim().toUpperCase();
+  const itypeEl=document.getElementById('n_inspectionType');
+  const itype=itypeEl?itypeEl.value:'B5';
+  if(!plate){toast('Enter the vehicle no first');return}
+  if(!driveReady()){toast('Google Drive isn\'t set up yet — see setup notes at the top of the script');return}
+  const statusEl=document.getElementById('n_geranUploadStatus');if(statusEl)statusEl.style.display='block';
+  let token;
+  try{ if(statusEl)statusEl.textContent='Connecting to Google Drive…'; token=await ensureDriveToken(); }
+  catch(err){ toast('Could not connect to Google Drive'); if(statusEl)statusEl.style.display='none'; return }
+  try{
+    const parentId=itype==='B2'?GERAN_B2_FOLDER_ID:GERAN_B5_FOLDER_ID;
+    const folderName=`${plate} ${itype==='B2'?'B2':'B5'}`;
+    if(statusEl)statusEl.textContent='Preparing folder "'+folderName+'"…';
+    const folderId=await driveGetOrCreateChildFolder(folderName,parentId,token);
+    for(const file of files){
+      if(statusEl)statusEl.textContent='Uploading '+file.name+'…';
+      const uploaded=await driveUploadFile(file,file.name,folderId,token);
+      newRecordGeranLink=uploaded.webViewLink||('https://drive.google.com/file/d/'+uploaded.id+'/view');
+    }
+    const noteEl=document.getElementById('n_geranUploadedNote');
+    if(noteEl)noteEl.innerHTML=`<div class="hint" style="color:var(--s-pass);font-weight:600">✅ Uploaded — <a href="${newRecordGeranLink}" target="_blank" rel="noopener">Open ↗</a></div>`;
+    const btnEl=e.target.nextElementSibling;
+    if(btnEl)btnEl.textContent='📤 Replace Geran to Drive';
+    toast('✅ Geran uploaded to Drive');
+  }catch(err){
+    toast('❌ Geran upload failed: '+((err&&err.message)||'unknown error'));
+  }
+  if(statusEl)statusEl.style.display='none';
 }
 function vr1ListHTML(r){
   const list=(r.puspakomReports&&r.puspakomReports.length)?r.puspakomReports:(r.puspakomReportLink?[{name:'Report',url:r.puspakomReportLink,uploadedAt:''}]:[]);
@@ -895,7 +963,8 @@ function seed(){
     ourCharge:330,runnerCharge:0,testCardFee:0,additionalAmount:0,additionalReason:'',renewalDue:'',
     geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,manualChecked:false,
     paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:'',pickupAddress:'',
-    remark:'',contactedDate:'',renewalCreated:false,nextId:'',prevId:'',demo:true,history:[]},o);
+    remark:'',contactedDate:'',renewalCreated:false,nextId:'',prevId:'',demo:true,history:[],
+    isArrangeInspection:false,carModel:'',geranHolder:'',specificTime:'',geranDriveLink:''},o);
   const A=mk({company:'(demo) ABC Logistics Sdn Bhd',plate:'PNX1234',puspakomDue:'2026-07-30',runner:'MR LEE',inspectionType:'BERKALA',status:'PENDING_CONTACT',ourCharge:330,isNew:true});
   const A2=mk({company:'(demo) Ocean Fresh Sdn Bhd',plate:'PNG7742',puspakomDue:'2026-08-10',runner:'MR LOO',inspectionType:'BERKALA',status:'PENDING_CONTACT',ourCharge:380,customerContact:'0124455667'});
   const B=mk({company:'(demo) Sunrise Trading Sdn Bhd',plate:'PQR5678',puspakomDue:'2026-07-12',runner:'MR LOO',inspectionType:'B2',b2Remark:'Lorry / cargo',status:'CONTACTED',ourCharge:380,contactedDate:toISO(new Date(Date.now()-4*864e5))});
@@ -906,7 +975,9 @@ function seed(){
   const F=mk({company:D.company,plate:D.plate,puspakomDue:'2026-12-28',runner:D.runner,inspectionType:'BERKALA',status:'PENDING_CONTACT',ourCharge:380,prevId:D.id});
   F.inspectionDate=calcInspection(F.puspakomDue,F.runner,F.id);F.history=[{s:'PENDING_CONTACT',t:nowStamp()}];
   D.renewalCreated=true;D.nextId=F.id;
-  return [A,A2,B,C,D,E,F];
+  const G=mk({company:'(demo) Eddy Tan',plate:'PKS5577',puspakomDue:'2026-08-03',inspectionDate:'2026-08-03',runner:'MR PETER LIM',inspectionType:'B5',status:'BOOKED',ourCharge:330,customerContact:'0125067398',picName:'eddy',pickupAddress:'18, Lrg Desa Palma 2, Taman Desa Palma, BM.',roadtaxDue:'2027-04-06',isArrangeInspection:true,carModel:'SSANGYONG ACTYON SPORTS',geranHolder:'Owner',specificTime:'Morning',contactedDate:toISO(new Date())});
+  G.history=[{s:'BOOKED',t:nowStamp()}];
+  return [A,A2,B,C,D,E,F,G];
 }
 
 function pillHTML(st){const s=STATUS[st];return `<span class="pill" style="color:var(${s.c});background:var(${s.c}-bg)">${s.l}</span>`}
@@ -1416,6 +1487,15 @@ function renderSheet(){
        ${STATUS_MSG[r.status]?`<div class="qmsg"><div class="qmsg-h">Send via WhatsApp — opens the chat with the message ready, you tap send</div>${STATUS_MSG[r.status].map(t=>`<span class="qmsg-pair"><button class="qmsg-b wa" onclick="openWhatsApp('${r.id}','${t}')">💬 ${MSG_LABEL[t]}</button><button class="qmsg-b copyalt" title="Copy text instead of opening WhatsApp" onclick="quickMsg('${r.id}','${t}')">📋</button></span>`).join('')}</div>`:''}
        ${r.history&&r.history.length?`<details class="histwrap"><summary>Status history (${r.history.length})</summary><div class="hist">${r.history.slice().reverse().map(h=>`<div class="row"><span>${STATUS[h.s]?STATUS[h.s].l:h.s}</span><span>${h.t}</span></div>`).join('')}</div></details>`:''}</div>
 
+     ${r.isArrangeInspection?`<div class="sect"><label class="h">Arrange Inspection Details</label>
+       <div class="grid2">${field('Car model','f_carModel',r.carModel)}${field('Original Geran','f_geranHolder',r.geranHolder||'Owner','select',['Owner','CH Office'])}</div>
+       ${field('Specific time / remark','f_specificTime',r.specificTime)}
+       ${linkField('Geran document (📄 press Open to view — auto-synced to Drive)','f_geranDriveLink',r.geranDriveLink)}
+       <input type="file" id="geranFileInput" accept="application/pdf,image/*" style="display:none" onchange="handleGeranUpload(event)">
+       <button type="button" class="mini import-btn" onclick="document.getElementById('geranFileInput').click()">📤 Upload Geran to Drive</button>
+       <div id="geranUploadStatus" class="hint" style="display:none;margin-top:6px"></div>
+       <button class="qmsg-b" style="width:100%;margin-top:9px" onclick="quickMsg('${r.id}','arrangeInspection')">📋 Copy Arrange Inspection message</button></div>`:''}
+
      <div class="sect"><label class="h">1 · Company Details</label>
        <div class="grid2">${field('Company name','f_company',r.company)}${field('Client type','f_clientType',r.clientType||'Corporate','select',['Corporate','Individual','Government','Other'])}</div>
        ${field('WA group name · shared company-wide','f_waGroupName',r.waGroupName)}
@@ -1497,7 +1577,8 @@ function readSheet(){const r=get(openId);if(!r)return null;const g=id=>{const e=
     f_clientType:'clientType',f_paymentStatus:'paymentStatus',f_picName:'picName',f_testCardLink:'testCardLink',f_puspakomReportLink:'puspakomReportLink',f_bookingSlipLink:'bookingSlipLink',f_puspakomBranch:'puspakomBranch',f_waGroupName:'waGroupName',
     f_clientConfirmDate:'clientConfirmDate',f_carrierName:'carrierName',f_icNumber:'icNumber',f_preferSlot:'preferSlot',f_jpjPermitNote:'jpjPermitNote',
     f_b2Remark:'b2Remark',f_quotationNo:'quotationNo',f_invoiceNo:'invoiceNo',f_customerContact:'customerContact',f_pickupAddress:'pickupAddress',
-    f_remark:'remark',f_additionalReason:'additionalReason',f_failItems:'failItems',f_retestDate:'retestDate',f_onHoldReason:'onHoldReason',f_renewalDue:'renewalDue'};
+    f_remark:'remark',f_additionalReason:'additionalReason',f_failItems:'failItems',f_retestDate:'retestDate',f_onHoldReason:'onHoldReason',f_renewalDue:'renewalDue',
+    f_carModel:'carModel',f_geranHolder:'geranHolder',f_specificTime:'specificTime',f_geranDriveLink:'geranDriveLink'};
   for(const k in map){const v=g(k);if(v!==undefined)r[map[k]]=v}
   ['ourCharge','runnerCharge','testCardFee','additionalAmount'].forEach(f=>{const v=g('f_'+f);if(v!==undefined)r[f]=+v||0});
   const rn=g('f_runner'),it=g('f_inspectionType');if(rn)r.runner=rn;if(it)r.inspectionType=it;return r}
@@ -1656,13 +1737,15 @@ document.addEventListener('change',e=>{if(!e.target)return;
   else if(e.target.id==='f_inspectionType'){readSheet();save();renderSheet()}
   else if(e.target.id==='f_additionalAmount'){readSheet();save();renderSheet()}});
 
-function openNew(mode){newRecordMode=mode||newRecordMode||'runner';renderNewSheet();showSheet()}
+function openNew(mode){newRecordMode=mode||newRecordMode||'runner';newRecordGeranLink='';renderNewSheet();showSheet()}
 function switchNewMode(m){newRecordMode=m;renderNewSheet()}
 function newModeToggle(){return `<div class="seg" style="margin-bottom:14px">
     <button class="${newRecordMode==='runner'?'on':''}" onclick="switchNewMode('runner')">🚐 Arrange Runner</button>
-    <button class="${newRecordMode==='booking'?'on':''}" onclick="switchNewMode('booking')">📋 Booking Only</button></div>`}
+    <button class="${newRecordMode==='booking'?'on':''}" onclick="switchNewMode('booking')">📋 Booking Only</button>
+    <button class="${newRecordMode==='inspection'?'on':''}" onclick="switchNewMode('inspection')">🔧 Arrange Inspection</button></div>`}
 function renderNewSheet(){
-  document.getElementById('sheetContent').innerHTML = newRecordMode==='booking'?renderNewBookingOnly():renderNewArrangeRunner();
+  const renderers={booking:renderNewBookingOnly,inspection:renderNewArrangeInspection};
+  document.getElementById('sheetContent').innerHTML = (renderers[newRecordMode]||renderNewArrangeRunner)();
   if(newRecordMode==='runner')document.getElementById('n_puspakomDue').addEventListener('change',previewNew);
 }
 function samanJpjFieldsHTML(){
@@ -1700,6 +1783,22 @@ function renderNewBookingOnly(){
        ${samanJpjFieldsHTML()}</div>
      <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
 }
+function renderNewArrangeInspection(){
+  return `<div class="sheet-h"><div><h2>New Record</h2><div class="sub">Arrange inspection directly with Puspakom — runner defaults to Mr Peter Lim, generates a ready-to-copy message</div></div><button class="x" onclick="closeSheet()">✕</button></div>
+   <div class="sheet-b">${newModeToggle()}<div class="sect"><label class="h">Vehicle &amp; inspection</label>
+       ${field('Company Name / Insured Name (state in geran)','n_company','')}
+       <div class="grid3">${field('Vehicle no','n_plate','')}${field('Car model','n_carModel','')}${field('Roadtax expired date','n_roadtaxDue','','date')}</div>
+       ${field('Original Geran','n_geranHolder','Owner','select',['Owner','CH Office'])}
+       <div class="grid3">${field('Required inspection date','n_reqInspectionDate','','date')}<div class="fld"><label>Inspection type</label><select id="n_inspectionType" onchange="document.getElementById('n_b2wrap').style.display=this.value==='B2'?'':'none'"><option>B5</option><option>B2</option></select></div>${field('Specific time / remark','n_specificTime','Morning')}</div>
+       <div id="n_b2wrap" style="display:none">${field('B2 inspection details · manual issue','n_b2Remark','')}</div>
+       <div class="grid3">${field('Contact person name','n_picName','')}${field('Contact number','n_customerContact','')}${field('Pick up location','n_pickupAddress','')}</div>
+       <div class="fld"><label>Geran document</label>
+         <div id="n_geranUploadedNote">${newRecordGeranLink?`<div class="hint" style="color:var(--s-pass);font-weight:600">✅ Uploaded — <a href="${newRecordGeranLink}" target="_blank" rel="noopener">Open ↗</a></div>`:''}</div>
+         <input type="file" id="n_geranFileInput" accept="application/pdf,image/*" style="display:none" onchange="handleNewGeranUpload(event)">
+         <button type="button" class="mini import-btn" onclick="document.getElementById('n_geranFileInput').click()">📤 ${newRecordGeranLink?'Replace':'Upload'} Geran to Drive</button>
+         <div id="n_geranUploadStatus" class="hint" style="display:none;margin-top:6px"></div></div></div>
+     <button class="bigbtn" onclick="addNew()">＋ Add record</button></div>`;
+}
 function previewNew(){const due=document.getElementById('n_puspakomDue').value,p=document.getElementById('n_preview');
   if(!due||!p)return;
   const iso=calcInspection(due,'MR LEE','_new');
@@ -1713,21 +1812,25 @@ function previewNew(){const due=document.getElementById('n_puspakomDue').value,p
 function addNew(){const g=id=>{const e=document.getElementById(id);return e?e.value:''};
   const gc=id=>{const e=document.getElementById(id);return e?e.checked:false};
   const bk=newRecordMode==='booking';
-  if(!g('n_plate').trim()||!g('n_puspakomDue')){toast('Please enter at least vehicle no and Puspakom due');return}
-  const statusKey=bk?'PENDING_BOOKING':(STATUS_LABEL_TO_KEY[g('n_status')]||'READY_TO_CONTACT');
+  const ai=newRecordMode==='inspection';
+  const dueVal=ai?g('n_reqInspectionDate'):g('n_puspakomDue');
+  if(!g('n_plate').trim()||!dueVal){toast('Please enter at least vehicle no and '+(ai?'required inspection date':'Puspakom due'));return}
+  const statusKey=bk?'PENDING_BOOKING':(ai?'BOOKED':(STATUS_LABEL_TO_KEY[g('n_status')]||'READY_TO_CONTACT'));
   const actualDate=g('n_actualInspectionDate');
-  const r={id:uid(),company:g('n_company').trim()||'(no company)',plate:g('n_plate').trim().toUpperCase(),puspakomDue:g('n_puspakomDue'),
-    roadtaxDue:g('n_roadtaxDue'),insuranceDue:g('n_insuranceDue'),clientType:g('n_clientType')||'Corporate',puspakomOnly:false,paymentStatus:'Not set',picName:'',
-    testCardLink:'',puspakomReportLink:'',puspakomReports:[],bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',waGroupName:g('n_waGroupName'),salesInsuranceHandled:false,salesRoadtaxHandled:false,runner:bk?'BOOKING ONLY':'MR LEE',inspectionType:g('n_inspectionType')||'BERKALA',b2Remark:'',
+  const r={id:uid(),company:g('n_company').trim()||'(no company)',plate:g('n_plate').trim().toUpperCase(),puspakomDue:dueVal,
+    roadtaxDue:g('n_roadtaxDue'),insuranceDue:g('n_insuranceDue'),clientType:g('n_clientType')||'Corporate',puspakomOnly:false,paymentStatus:'Not set',picName:g('n_picName').trim(),
+    testCardLink:'',puspakomReportLink:'',puspakomReports:[],bookingSlipLink:'',driveLink:'',puspakomBranch:'Mak Mandin',waGroupName:g('n_waGroupName'),salesInsuranceHandled:false,salesRoadtaxHandled:false,runner:bk?'BOOKING ONLY':(ai?'MR PETER LIM':'MR LEE'),inspectionType:g('n_inspectionType')||'BERKALA',b2Remark:g('n_b2Remark').trim(),
     quotationNo:g('n_quotationNo').trim(),invoiceNo:'',ourCharge:+g('n_ourCharge')||330,runnerCharge:0,testCardFee:0,additionalAmount:0,
     additionalReason:'',renewalDue:'',geranReceived:false,discReceived:false,addedToQuotation:false,runnerInvoiceReceived:false,
-    manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:g('n_customerContact').trim(),pickupAddress:'',
+    manualChecked:false,paymentSubmitted:false,paymentTs:'',failItems:'',retestDate:'',onHoldReason:'',customerContact:g('n_customerContact').trim(),pickupAddress:g('n_pickupAddress').trim(),
     clientConfirmDate:g('n_clientConfirmDate'),carrierName:g('n_carrierName').trim(),icNumber:g('n_icNumber').trim(),preferSlot:g('n_preferSlot'),
     needsSaman:gc('n_needsSaman'),samanPaid:false,needsJpjPermit:gc('n_needsJpjPermit'),jpjPermitNote:g('n_jpjPermitNote').trim(),jpjPermitDone:false,
-    remark:'',status:statusKey,contactedDate:(statusKey!=='PENDING_CONTACT'&&statusKey!=='READY_TO_CONTACT')?toISO(new Date()):'',renewalCreated:false,nextId:'',prevId:'',demo:false,isNew:true,history:[{s:statusKey,t:nowStamp()}]};
-  r.inspectionDate=actualDate||calcInspection(r.puspakomDue,r.runner,r.id);
+    remark:'',status:statusKey,contactedDate:(statusKey!=='PENDING_CONTACT'&&statusKey!=='READY_TO_CONTACT')?toISO(new Date()):'',renewalCreated:false,nextId:'',prevId:'',demo:false,isNew:true,history:[{s:statusKey,t:nowStamp()}],
+    isArrangeInspection:ai,carModel:g('n_carModel').trim(),geranHolder:ai?(g('n_geranHolder')||'Owner'):'',specificTime:g('n_specificTime').trim(),geranDriveLink:ai?newRecordGeranLink:''};
+  r.inspectionDate=ai?dueVal:(actualDate||calcInspection(r.puspakomDue,r.runner,r.id));
   fillCompanyFieldsFromExisting(r);DATA.push(r);save();closeSheet();switchView('master');toast('Added '+r.plate);
-  logActivity('Added new record',r.plate+(bk?' (Booking Only)':''))}
+  logActivity('Added new record',r.plate+(bk?' (Booking Only)':(ai?' (Arrange Inspection)':'')));
+  newRecordGeranLink='';}
 
 function msgText(r,type){const ins=fmt(r.inspectionDate),due=fmt(r.puspakomDue);
   if(type==='arrange')return `Good Afternoon\n\nVehicle No : ${r.plate}   Puspakom Date : ${ins}\nPuspakom Due : ${due}\n\nPlease check and confirm the Puspakom date, please inform us if any adjustment needed. 😊\n\n⚠️ The reserve date only been hold for 3 day. Date will be rescheduled after 3 day.`;
@@ -1737,6 +1840,8 @@ function msgText(r,type){const ins=fmt(r.inspectionDate),due=fmt(r.puspakomDue);
   if(type==='runner')return `${r.plate}  (${ins})\nRunner : ${r.runner}${RUNNER_PHONE[r.runner]?'  ('+RUNNER_PHONE[r.runner]+')':''}\nCollect contact : ${r.customerContact||'—'}\nAddress : ${r.pickupAddress||'—'}\n( Test card PDF attached )`;
   if(type==='retest')return `Vehicle plate : ${r.plate}\nPuspakom result : FAILED ❌\nFail item :\n${r.failItems||'—'}\n\nRetest date : ${fmt(r.retestDate)}`;
   if(type==='extra')return `【${r.plate}】inspection has incurred the following additional charges:\n\nReason: ${r.additionalReason||'—'} - RM ${(+r.additionalAmount||0).toFixed(2)}\n\nThe charges have already been added to the invoice. Kindly arrange the payment at your earliest convenience.\nThank you.`;
+  if(type==='arrangeInspection'){const geranTxt=r.geranHolder==='CH Office'?'CH Office的位':'车主的位';
+    return `Puspakom - ${r.inspectionType||'B5'}\nDate: ${ins}\nSpecific Time: ${r.specificTime||'—'}\n\nVehicle No: ${r.plate}\nCar Model: ${r.carModel||'—'}\nPick Up's Location: ${r.pickupAddress||'—'}\nContact No: ${r.customerContact||'—'}${r.picName?' '+r.picName:''}\n\nRoad tax Expired Date: ${fmt(r.roadtaxDue)}\nGeran: ${geranTxt}`;}
   return ''}
 function quickMsg(id,type){if(openId===id&&document.getElementById('f_status')){readSheet();save()}
   const txt=msgText(get(id),type);
