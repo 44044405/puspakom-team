@@ -1193,7 +1193,7 @@ function viewMaster(){
     <div class="cell">${fmt(r.inspectionDate)}</div>
     <div class="stcell" onclick="stopRow(event)">
       <div class="stwrap">
-        <select class="stsel" onclick="stopRow(event)" onchange="setStatusDirect('${r.id}',this.value)">${statusKeysFor(r).map(k=>`<option value="${k}" style="color:#111" ${k===r.status?'selected':''}>${STATUS[k].l}</option>`).join('')}</select>
+        <select class="stsel" style="${r.status==='PASS'?'background:var(--s-pass-bg)':''}" onclick="stopRow(event)" onchange="setStatusDirect('${r.id}',this.value)">${statusKeysFor(r).map(k=>`<option value="${k}" style="color:#111" ${k===r.status?'selected':''}>${STATUS[k].l}</option>`).join('')}</select>
         <span class="stdisp" style="color:${r.status==='PASS'?'var(--s-pass-cy)':'var(--navy)'}">${STATUS[r.status]?STATUS[r.status].l:''}</span>
       </div>
       ${STATUS_MSG[r.status]&&STATUS_MSG[r.status].length?`<button class="stcopy" title="Copy WhatsApp message" onclick="copyRowMsg(event,'${r.id}')">📋</button>`:''}</div></div>`;
@@ -1204,7 +1204,7 @@ function viewMaster(){
       <span class="tag">RM<b>${+r.ourCharge||0}</b></span></div>
       <div class="stcell" style="margin-top:9px" onclick="stopRow(event)">
         <div class="stwrap">
-          <select class="stsel" onclick="stopRow(event)" onchange="setStatusDirect('${r.id}',this.value)">${statusKeysFor(r).map(k=>`<option value="${k}" style="color:#111" ${k===r.status?'selected':''}>${STATUS[k].l}</option>`).join('')}</select>
+          <select class="stsel" style="${r.status==='PASS'?'background:var(--s-pass-bg)':''}" onclick="stopRow(event)" onchange="setStatusDirect('${r.id}',this.value)">${statusKeysFor(r).map(k=>`<option value="${k}" style="color:#111" ${k===r.status?'selected':''}>${STATUS[k].l}</option>`).join('')}</select>
           <span class="stdisp" style="color:${r.status==='PASS'?'var(--s-pass-cy)':'var(--navy)'}">${STATUS[r.status]?STATUS[r.status].l:''}</span>
         </div>
         ${STATUS_MSG[r.status]&&STATUS_MSG[r.status].length?`<button class="stcopy" title="Copy WhatsApp message" onclick="copyRowMsg(event,'${r.id}')">📋</button>`:''}</div></div></div>`;
